@@ -10,7 +10,12 @@ load_dotenv(ROOT_DIR / ".env")
 
 class Settings:
     def __init__(self) -> None:
-        self.gemini_api_key: str = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
+        self.gemini_api_key: str = (
+            os.getenv("GEMINI_API_KEY")
+            or os.getenv("GOOGLE_API_KEY")
+            or os.getenv("DEEPMIND_API_KEY")
+            or ""
+        )
         self.google_api_key: str = os.getenv("GOOGLE_API_KEY") or ""
         self.tavily_api_key: str = os.getenv("TAVILY_API_KEY") or ""
         self.slng_api_key: str = os.getenv("SLNG_API_KEY") or ""
@@ -25,6 +30,7 @@ class Settings:
         self.gemini_candidate_model: str = os.getenv("GEMINI_CANDIDATE_MODEL", "gemini-2.5-flash")
         self.slng_base_url: str = os.getenv("SLNG_BASE_URL", "https://api.slng.ai")
         self.mubit_endpoint: str = os.getenv("MUBIT_ENDPOINT", "https://api.mubit.ai")
+        self.mubit_transport: str = os.getenv("MUBIT_TRANSPORT", "http")
         self.allow_web_video_fetch: bool = os.getenv("ALLOW_WEB_VIDEO_FETCH", "true").lower() == "true"
 
         self.upload_dir.mkdir(parents=True, exist_ok=True)

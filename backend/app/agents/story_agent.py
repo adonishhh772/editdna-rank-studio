@@ -20,6 +20,13 @@ from app.services.goal_harness import (
     inject_harness_feedback,
     unmet_goal_issues,
 )
+from app.services.video_analysis_store import get_candidate_analysis_by_rank
+from app.services.story_coherence_service import (
+    build_rank_label_text,
+    build_section_voiceover_text,
+    derive_video_moment_title,
+    is_generic_analysis_reason,
+)
 from app.constants.harness import GOAL_RANK_ONE_EMPHASIS
 from app.db import new_id, utc_now
 from app.schemas import AgentMessage, ExpertProposal, MoERoutingWeights
@@ -200,6 +207,12 @@ class CutAgent(BaseAgent):
         for candidate in candidates:
             rank = candidate.recommended_rank or len(clip_adjustments) + 1
             duration = candidate.duration_sec or avg_duration
+            analysis_entry = get_candidate_analysis_by_rank(blackboard, rank)
+            highlight_reason = (
+                analysis_entry.get("highlight_reason")
+                if analysis_entry
+                else candidate.highlight_reason
+            )
 
             if candidate.clip_start_sec is not None and candidate.clip_end_sec is not None:
                 clip_start = candidate.clip_start_sec
@@ -250,6 +263,7 @@ class CutAgent(BaseAgent):
                     "clip_start_sec": clip_start,
                     "clip_end_sec": max(clip_end, clip_start + 1.0),
                     "candidate_id": candidate.candidate_id,
+                    "highlight_reason": highlight_reason,
                 }
             )
             transition_updates.append({"rank": rank, "type": "hard_cut"})
@@ -285,8 +299,8 @@ class CutAgent(BaseAgent):
             clip_adjustments=clip_adjustments,
             transition_updates=transition_updates,
             reasoning=(
-                f"Cut/stitch windows follow reference blueprint "
-                f"(~{avg_duration:.1f}s rank segments, hook/outro pacing preserved)."
+                f"Cut/stitch windows follow saved video analysis and reference blueprint "
+                f"(~{avg_duration:.1f}s rank segments, highlight windows preserved)."
             ),
             peer_influence=peer_influence,
         )
@@ -318,15 +332,25 @@ class CaptionAgent(BaseAgent):
 
         for candidate in candidates:
             rank = candidate.recommended_rank or len(caption_updates) + 1
-            label = candidate.concept[:60]
+            analysis_entry = get_candidate_analysis_by_rank(blackboard, rank)
+            video_moment_title = derive_video_moment_title(candidate)
+            if analysis_entry:
+                stored_highlight = analysis_entry.get("highlight_reason")
+                if stored_highlight and not is_generic_analysis_reason(str(stored_highlight)):
+                    candidate.highlight_reason = str(stored_highlight)
+                    video_moment_title = derive_video_moment_title(candidate)
+
+            label = build_rank_label_text(rank, video_moment_title)
             if use_uppercase:
                 label = label.upper()
+            voiceover_text = build_section_voiceover_text(rank, candidate)
             caption_updates.append(
                 {
                     "rank": rank,
                     "caption_text": label,
                     "label_text": label,
-                    "voiceover_text": f"Number {rank}: {candidate.concept}",
+                    "voiceover_text": voiceover_text,
+                    "video_moment_title": video_moment_title,
                 }
             )
 
@@ -379,7 +403,7 @@ class CaptionAgent(BaseAgent):
             round_id=round_id,
             confidence=min(0.62 + routing.caption * 0.38, 1.0),
             caption_updates=caption_updates,
-            reasoning="Captions aligned to reference style with rank labels and voiceover lines.",
+            reasoning="Captions and voiceover lines describe what happens in each clip window, not source video titles.",
             peer_influence=peer_influence,
         )
         return proposal, messages
@@ -409,8 +433,14 @@ class MotionAgent(BaseAgent):
 
         for candidate in candidates:
             rank = candidate.recommended_rank or len(motion_updates) + 1
-            zoom = rank == 1
-            pan = candidate.motion_energy_score > 0.6
+            analysis_entry = get_candidate_analysis_by_rank(blackboard, rank)
+            motion_energy = candidate.motion_energy_score
+            if analysis_entry:
+                motion_energy = float(
+                    analysis_entry.get("scores", {}).get("motion_energy", motion_energy)
+                )
+            zoom = rank == 1 or motion_energy >= 0.75
+            pan = motion_energy > 0.6
             scale = 1.15 if rank == 1 and high_drama else 1.05 if zoom else 1.0
             motion_updates.append(
                 {
@@ -418,7 +448,7 @@ class MotionAgent(BaseAgent):
                     "zoom": zoom,
                     "pan": pan,
                     "scale": scale,
-                    "energy": candidate.motion_energy_score,
+                    "energy": motion_energy,
                 }
             )
             transition_updates.append(

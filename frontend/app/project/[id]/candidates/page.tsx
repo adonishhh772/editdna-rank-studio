@@ -17,6 +17,10 @@ import {
   getProject,
   getTraces,
 } from "@/lib/api";
+import {
+  continueReviewUntilReady,
+  REVIEW_STATUS_AWAITING_APPROVAL,
+} from "@/lib/candidateReviewFlow";
 
 type Candidate = {
   candidate_id: string;
@@ -73,20 +77,53 @@ export default function CandidatesPage() {
     setReviewStatus(statusData);
   }, [projectId]);
 
-  const runReviewWorkflow = useCallback(
+  const fetchReviewStatus = useCallback(
+    () => getCandidateReviewStatus(projectId),
+    [projectId],
+  );
+
+  const runWorkflowPath = useCallback(
+    (path: string) => workflowStream.run(path),
+    [workflowStream],
+  );
+
+  const completeReviewAction = useCallback(
     async (endpoint: string) => {
       setIsPreparing(true);
       setError(null);
       try {
         await workflowStream.run(endpoint);
+        await continueReviewUntilReady(projectId, runWorkflowPath, fetchReviewStatus);
         await refresh();
       } catch (workflowError) {
-        setError(workflowError instanceof Error ? workflowError.message : "Candidate review failed");
+        const rawMessage =
+          workflowError instanceof Error ? workflowError.message : "Candidate review failed";
+        const isTransientGeminiError =
+          rawMessage.includes("503") ||
+          rawMessage.includes("UNAVAILABLE") ||
+          rawMessage.toLowerCase().includes("timed out");
+        setError(
+          isTransientGeminiError
+            ? "Gemini timed out while fetching the next clip. Your decision was saved — use Find topic clip to retry."
+            : rawMessage,
+        );
+        try {
+          await refresh();
+        } catch {
+          // Ignore refresh failures after a workflow error.
+        }
       } finally {
         setIsPreparing(false);
       }
     },
-    [refresh, workflowStream],
+    [fetchReviewStatus, projectId, refresh, runWorkflowPath, workflowStream],
+  );
+
+  const runReviewWorkflow = useCallback(
+    async (endpoint: string) => {
+      await completeReviewAction(endpoint);
+    },
+    [completeReviewAction],
   );
 
   const prepareReviewSlot = useCallback(async () => {
@@ -107,21 +144,11 @@ export default function CandidatesPage() {
           await workflowStream.run(`/api/projects/${projectId}/candidates/discover`);
         }
 
-        const statusData = await getCandidateReviewStatus(projectId);
-        const shouldAutoStartReview =
-          statusData.review_active &&
-          statusData.pending_count > 0 &&
-          !statusData.current_candidate &&
-          statusData.current_status !== "preparing" &&
-          statusData.current_status !== "awaiting_approval";
-
-        if (shouldAutoStartReview) {
-          setIsPreparing(true);
-          try {
-            await workflowStream.run(`/api/projects/${projectId}/candidates/review/start`);
-          } finally {
-            setIsPreparing(false);
-          }
+        setIsPreparing(true);
+        try {
+          await continueReviewUntilReady(projectId, runWorkflowPath, fetchReviewStatus);
+        } finally {
+          setIsPreparing(false);
         }
 
         await refresh();
@@ -130,7 +157,7 @@ export default function CandidatesPage() {
       }
     };
     bootstrap();
-  }, [projectId]);
+  }, [fetchReviewStatus, projectId, refresh, runWorkflowPath, workflowStream]);
 
   const approvedCandidates = useMemo(
     () => ((project?.approved_candidates as Candidate[]) || []).slice().sort(
@@ -140,14 +167,11 @@ export default function CandidatesPage() {
   );
 
   const currentCandidate = useMemo(() => {
-    if (reviewStatus?.current_candidate) {
+    if (reviewStatus?.current_status === REVIEW_STATUS_AWAITING_APPROVAL && reviewStatus.current_candidate) {
       return reviewStatus.current_candidate;
     }
-    const pending = ((project?.selected_candidates as Candidate[]) || []).filter(
-      (candidate) => candidate.status !== "approved" && candidate.status !== "rejected",
-    );
-    return pending[0] ?? null;
-  }, [project, reviewStatus]);
+    return null;
+  }, [reviewStatus]);
 
   const totalSlots = reviewStatus?.total_slots ?? approvedCandidates.length;
   const approvedCount = reviewStatus?.approved_count ?? approvedCandidates.length;
@@ -168,31 +192,19 @@ export default function CandidatesPage() {
 
   const handleApproveCandidate = async (candidateId: string) => {
     setActionCandidateId(candidateId);
-    setIsPreparing(true);
-    setError(null);
     try {
-      await workflowStream.run(`/api/projects/${projectId}/candidates/${candidateId}/approve`);
-      await refresh();
-    } catch (approveError) {
-      setError(approveError instanceof Error ? approveError.message : "Approve failed");
+      await completeReviewAction(`/api/projects/${projectId}/candidates/${candidateId}/approve`);
     } finally {
       setActionCandidateId(null);
-      setIsPreparing(false);
     }
   };
 
   const handleRejectCandidate = async (candidateId: string) => {
     setActionCandidateId(candidateId);
-    setIsPreparing(true);
-    setError(null);
     try {
-      await workflowStream.run(`/api/projects/${projectId}/candidates/${candidateId}/reject`);
-      await refresh();
-    } catch (rejectError) {
-      setError(rejectError instanceof Error ? rejectError.message : "Decline and re-search failed");
+      await completeReviewAction(`/api/projects/${projectId}/candidates/${candidateId}/reject`);
     } finally {
       setActionCandidateId(null);
-      setIsPreparing(false);
     }
   };
 
@@ -248,8 +260,8 @@ export default function CandidatesPage() {
           <div className="glass-card">
             <h1 className="text-3xl font-bold">Candidate Approval</h1>
             <p className="mt-2 text-slate-400">
-              Search uses your topic first (YouTube Shorts + TikTok). Skip slots or continue to the studio when
-              you are ready — you will not get stuck on a single failed download.
+              Approve each clip and the next topic Short is fetched automatically until all slots are filled.
+              Skip slots or continue to the studio when you are ready.
             </p>
             {totalSlots > 0 && (
               <p className="mt-2 text-sm text-neonBlue" data-testid="candidate-review-progress">
@@ -316,7 +328,7 @@ export default function CandidatesPage() {
           {showPreparingState && !currentCandidate && (
             <div className="glass-card text-slate-400" data-testid="candidate-preparing-state">
               {workflowStream.activeReasoning ||
-                "Searching topic Shorts on YouTube + TikTok and downloading the best match..."}
+                "Fetching the next topic Short from YouTube + TikTok..."}
             </div>
           )}
           {currentCandidate ? (

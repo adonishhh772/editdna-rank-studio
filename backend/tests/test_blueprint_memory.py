@@ -4,7 +4,7 @@ import pytest
 
 from app.agents.mubit_memory_agent import MubitMemoryAgent, ReferenceBlueprintMemoryAgent
 from app.blackboard import ProjectBlackboard
-from app.schemas import ReferenceBlueprint
+from app.schemas import AgentTrace, FeedbackEvent, ReferenceBlueprint
 from app.services.blueprint_memory import build_reference_blueprint_memory_content
 
 
@@ -118,6 +118,49 @@ async def test_reference_blueprint_memory_agent_writes_trace_and_updates() -> No
     assert memory_trace.metadata["parent_agent_id"] == "reference_analyst"
     assert "reference blueprint" in memory_trace.output_summary.lower()
     assert len(result.memory_updates) == 1
+
+
+@pytest.mark.asyncio
+async def test_write_feedback_memory_stores_updates_when_mubit_fails() -> None:
+    blackboard = ProjectBlackboard(
+        project_id="proj-feedback",
+        run_id="run-feedback",
+        user_id="default-user",
+        feedback_events=[
+            FeedbackEvent(
+                feedback_id="fb-1",
+                project_id="proj-feedback",
+                run_id="run-feedback",
+                user_id="default-user",
+                feedback_type="final_approve",
+                feedback_text="Final approve",
+            )
+        ],
+        traces=[
+            AgentTrace(
+                trace_id="trace-1",
+                project_id="proj-feedback",
+                run_id="run-feedback",
+                agent_id="feedback_memory",
+                agent_name="Feedback Memory",
+                status="running",
+            )
+        ],
+    )
+
+    with patch("app.agents.mubit_memory_agent.MubitMemoryClient") as client_cls:
+        client = client_cls.return_value
+        client.remember_short_term = AsyncMock(side_effect=RuntimeError("HTTP 403"))
+
+        result = await MubitMemoryAgent().write_feedback_memory(blackboard)
+
+    assert len(result.memory_updates) == 1
+    update = result.memory_updates[0]
+    assert update["short_term_updates"]
+    assert update["episodic_updates"]
+    assert "local only" in update["summary"].lower()
+    assert result.traces[-1].output_summary == update["summary"]
+    client.remember_short_term.assert_awaited_once()
 
 
 @pytest.mark.asyncio

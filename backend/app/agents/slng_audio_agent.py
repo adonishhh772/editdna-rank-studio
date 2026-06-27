@@ -11,11 +11,16 @@ class SLNGAudioAgent(BaseAgent):
         if blackboard.edit_plan and blackboard.edit_plan.sections:
             try:
                 client = SLNGAudioClient()
+                ordered_sections = sorted(
+                    blackboard.edit_plan.sections,
+                    key=lambda section: section.rank,
+                )
                 voiceover_lines = [
                     section.voiceover_text or section.label_text
-                    for section in blackboard.edit_plan.sections
+                    for section in ordered_sections
+                    if section.voiceover_text or section.label_text
                 ]
-                text = ". ".join(voiceover_lines[:3])
+                text = ". ".join(voiceover_lines)
                 output_path = f"outputs/{blackboard.project_id}/voiceover_v{blackboard.current_version}.wav"
                 path = await client.generate_voiceover(text, output_path)
                 blackboard.edit_plan.audio_plan["voiceover_path"] = path

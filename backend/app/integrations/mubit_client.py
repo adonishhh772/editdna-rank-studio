@@ -22,7 +22,8 @@ class MubitMemoryClient:
         self.client = Client(
             api_key=settings.mubit_api_key,
             run_id=run_id,
-            transport="auto",
+            endpoint=settings.mubit_endpoint,
+            transport=settings.mubit_transport,
         )
 
     async def _poll_ingest(self, job_id: str | None) -> None:

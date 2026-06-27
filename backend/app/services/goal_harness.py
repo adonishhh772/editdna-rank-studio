@@ -7,6 +7,7 @@ from app.constants.harness import (
     GOAL_MOE_COMPLETE,
     GOAL_NO_CONFLICTS,
     GOAL_RANK_ONE_EMPHASIS,
+    GOAL_STORY_COHERENCE,
 )
 from app.constants.moe import EXPERT_DOMAIN_MOTION, MESSAGE_TYPE_CONFLICT, MESSAGE_TYPE_FEEDBACK
 from app.db import new_id, utc_now
@@ -87,6 +88,25 @@ def evaluate_edit_plan_goals(blackboard: ProjectBlackboard) -> list[GoalEvaluati
             goal_id=GOAL_RANK_ONE_EMPHASIS,
             met=rank_one_met,
             issue=rank_one_issue,
+        )
+    )
+
+    story_met = True
+    story_issue: str | None = None
+    if blackboard.edit_plan:
+        story_ready = blackboard.edit_plan.story_ready
+        story_issues = blackboard.edit_plan.story_issues
+        if not story_ready:
+            story_met = False
+            story_issue = "; ".join(story_issues[:3]) if story_issues else "Edit plan story is not coherent"
+        elif story_issues:
+            story_issue = "; ".join(story_issues[:2])
+
+    evaluations.append(
+        GoalEvaluation(
+            goal_id=GOAL_STORY_COHERENCE,
+            met=story_met,
+            issue=story_issue if not story_met else None,
         )
     )
 

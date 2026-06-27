@@ -277,17 +277,20 @@ async def list_candidates(project_id: str):
 async def approve_candidate(
     project_id: str,
     candidate_id: str,
-    payload: CandidateApprovalRequest,
+    payload: CandidateApprovalRequest = CandidateApprovalRequest(),
     stream: bool = Query(default=False),
 ):
     board = get_board(project_id)
-    result = await run_review_or_stream(
-        stream,
-        project_id,
-        "candidate_review",
-        board,
-        lambda current_board: approval_service.approve_candidate(current_board, candidate_id),
-    )
+    try:
+        result = await run_review_or_stream(
+            stream,
+            project_id,
+            "candidate_review",
+            board,
+            lambda current_board: approval_service.approve_candidate(current_board, candidate_id),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if isinstance(result, StreamingResponse):
         return result
     return result.model_dump()
@@ -297,17 +300,20 @@ async def approve_candidate(
 async def reject_candidate(
     project_id: str,
     candidate_id: str,
-    payload: CandidateApprovalRequest,
+    payload: CandidateApprovalRequest = CandidateApprovalRequest(),
     stream: bool = Query(default=False),
 ):
     board = get_board(project_id)
-    result = await run_review_or_stream(
-        stream,
-        project_id,
-        "candidate_review",
-        board,
-        lambda current_board: approval_service.reject_candidate(current_board, candidate_id),
-    )
+    try:
+        result = await run_review_or_stream(
+            stream,
+            project_id,
+            "candidate_review",
+            board,
+            lambda current_board: approval_service.reject_candidate(current_board, candidate_id),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     if isinstance(result, StreamingResponse):
         return result
     return result.model_dump()
@@ -342,11 +348,16 @@ async def create_edit_plan(project_id: str, stream: bool = Query(default=False))
 @router.post("/{project_id}/edit-plan/approve")
 async def approve_edit_plan(project_id: str):
     board = get_board(project_id)
+    if not board.edit_plan:
+        raise HTTPException(status_code=400, detail="Edit plan is not ready for approval")
+    should_resume = board.human_gate_type == "edit_plan_approval"
     board = await get_orchestrator().clear_human_gate(board)
     if board.edit_plan:
         board.edit_plan.needs_human_approval = False
     board.stage = "edit_plan_approved"
     save_blackboard(board)
+    if should_resume:
+        board = await get_orchestrator().resume_after_human_gate(project_id, STAGE_CREATE_EDIT_PLAN)
     return board.model_dump()
 
 

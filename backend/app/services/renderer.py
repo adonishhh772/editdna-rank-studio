@@ -35,10 +35,11 @@ class VideoRenderer:
                 section.clip_end_sec,
             )
             await scale_to_vertical(trimmed, scaled)
+            overlay_text = section.caption_text or section.label_text
             await add_text_overlay(
                 scaled,
                 labeled,
-                f"#{section.rank} {section.label_text}",
+                overlay_text,
                 start_sec=0.0,
                 duration_sec=min(2.5, section.clip_end_sec - section.clip_start_sec),
             )

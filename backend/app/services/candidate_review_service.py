@@ -37,7 +37,10 @@ from app.services.concept_sanitizer import (
     normalize_research_concepts,
 )
 from app.services.preference_learning_service import should_use_lightweight_selection
+from app.constants.video_analysis import ANALYSIS_SOURCE_GEMINI, ANALYSIS_SOURCE_LIGHTWEIGHT
 from app.services.segment_selection_service import apply_reference_segment_to_candidate
+from app.services.story_coherence_service import enrich_candidate_story_fields
+from app.services.video_analysis_store import save_candidate_video_analysis
 from app.services.video_utils import generate_thumbnail, get_video_dimensions, get_video_duration
 from app.services.web_video_fetch import PlatformSearchHit, WebVideoFetchService
 
@@ -59,7 +62,7 @@ class CandidateReviewService:
             if slot.status in {SLOT_STATUS_PENDING, SLOT_STATUS_PREPARING, SLOT_STATUS_AWAITING_APPROVAL}
         )
         exhausted_count = sum(1 for slot in queue if slot.status == SLOT_STATUS_EXHAUSTED)
-        active_slot = self._find_next_pending_slot(blackboard) or self._find_awaiting_slot(blackboard)
+        active_slot = self._find_active_review_slot(blackboard)
 
         current_candidate = None
         current_status = None
@@ -133,7 +136,7 @@ class CandidateReviewService:
             None,
         )
         if preparing_slot:
-            return blackboard
+            return await self._prepare_slot(blackboard, preparing_slot)
 
         return await self.prepare_next_slot(blackboard)
 
@@ -181,6 +184,15 @@ class CandidateReviewService:
         blackboard: ProjectBlackboard,
         candidate_id: str,
     ) -> ProjectBlackboard:
+        already_approved = next(
+            (item for item in blackboard.approved_candidates if item.candidate_id == candidate_id),
+            None,
+        )
+        if already_approved is not None:
+            blackboard.selected_candidates = []
+            save_blackboard(blackboard)
+            return blackboard
+
         slot = self._find_slot_by_candidate_id(blackboard, candidate_id)
         if slot is None or slot.current_candidate is None:
             raise RuntimeError("Candidate is not awaiting approval")
@@ -205,8 +217,9 @@ class CandidateReviewService:
         blackboard.candidate_pool = [
             item for item in blackboard.candidate_pool if item.candidate_id != candidate_id
         ] + [approved]
-
-        return await self.prepare_next_slot(blackboard)
+        blackboard.selected_candidates = []
+        save_blackboard(blackboard)
+        return blackboard
 
     async def reject_candidate(
         self,
@@ -241,11 +254,10 @@ class CandidateReviewService:
                 f"Could not find an acceptable video for '{slot.concept}' "
                 f"after {MAX_SEARCH_ATTEMPTS_PER_SLOT} attempts"
             )
-            blackboard.selected_candidates = []
-            save_blackboard(blackboard)
-            return await self.prepare_next_slot(blackboard)
 
-        return await self._prepare_slot(blackboard, slot)
+        blackboard.selected_candidates = []
+        save_blackboard(blackboard)
+        return blackboard
 
     async def _prepare_slot(self, blackboard: ProjectBlackboard, slot: CandidateReviewSlot) -> ProjectBlackboard:
         slot.status = SLOT_STATUS_PREPARING
@@ -253,6 +265,21 @@ class CandidateReviewService:
         blackboard.selected_candidates = []
         save_blackboard(blackboard)
 
+        try:
+            return await self._prepare_slot_inner(blackboard, slot)
+        except Exception as exc:
+            if slot.status == SLOT_STATUS_PREPARING:
+                slot.status = SLOT_STATUS_PENDING
+                slot.last_error = str(exc)
+            blackboard.selected_candidates = []
+            save_blackboard(blackboard)
+            raise
+
+    async def _prepare_slot_inner(
+        self,
+        blackboard: ProjectBlackboard,
+        slot: CandidateReviewSlot,
+    ) -> ProjectBlackboard:
         topic = blackboard.topic or ""
         youtube_search_mode = (
             blackboard.topic_research.youtube_search_mode if blackboard.topic_research else None
@@ -529,7 +556,7 @@ class CandidateReviewService:
         selected = candidate.model_copy(deep=True)
         selected = apply_reference_segment_to_candidate(selected, blackboard.reference_blueprint)
         selected.duration_sec = await get_video_duration(candidate.local_file_path)
-        selected.overall_score = max(selected.overall_score, selected.reference_style_fit_score)
+        selected = enrich_candidate_story_fields(selected)
         learning_note = "; ".join(learning_reasons) if learning_reasons else "Matches learned preferences"
         selected.reason = (
             f"Auto-selected from learned preferences — {learning_note}. "
@@ -559,6 +586,11 @@ class CandidateReviewService:
             visible_reasoning="Learned preferences matched — skipping Gemini analysis.",
         )
         blackboard.traces.append(trace)
+        save_candidate_video_analysis(
+            blackboard,
+            selected,
+            analysis_source=ANALYSIS_SOURCE_LIGHTWEIGHT,
+        )
         save_blackboard(blackboard)
         return selected
 
@@ -573,8 +605,25 @@ class CandidateReviewService:
             raise RuntimeError("Downloaded video file is missing")
 
         blackboard, analyzed = await analyze_candidate_with_swarm(blackboard, candidate)
+        analyzed = enrich_candidate_story_fields(analyzed)
+        save_candidate_video_analysis(
+            blackboard,
+            analyzed,
+            analysis_source=ANALYSIS_SOURCE_GEMINI,
+        )
         save_blackboard(blackboard)
         return analyzed
+
+    def _find_active_review_slot(self, blackboard: ProjectBlackboard) -> CandidateReviewSlot | None:
+        awaiting_slot = self._find_awaiting_slot(blackboard)
+        if awaiting_slot is not None:
+            return awaiting_slot
+
+        for slot in blackboard.candidate_review_queue:
+            if slot.status == SLOT_STATUS_PREPARING:
+                return slot
+
+        return self._find_next_pending_slot(blackboard)
 
     def _find_next_pending_slot(self, blackboard: ProjectBlackboard) -> CandidateReviewSlot | None:
         for slot in blackboard.candidate_review_queue:

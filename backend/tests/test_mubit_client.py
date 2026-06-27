@@ -21,6 +21,8 @@ def mock_mubit_client() -> MagicMock:
         with patch("app.integrations.mubit_client.get_settings") as settings_mock:
             settings = MagicMock()
             settings.mubit_api_key = "test-key"
+            settings.mubit_endpoint = "https://api.mubit.ai"
+            settings.mubit_transport = "http"
             settings_mock.return_value = settings
             yield mock_client
 

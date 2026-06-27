@@ -45,6 +45,42 @@ def _research_board():
     return blackboard
 
 
+def test_build_status_prioritizes_awaiting_slot_over_pending_slots():
+    service = CandidateReviewService()
+    board = _research_board()
+    service.initialize_queue(board)
+
+    awaiting_candidate = CandidateVideo(
+        candidate_id=new_id("cand"),
+        project_id=board.project_id,
+        title="Clip A",
+        source_type="public_url_reference",
+        source_url="https://www.youtube.com/watch?v=abc111",
+        local_file_path="/tmp/uploads/candidates/youtube_123.mp4",
+        concept="Concept A",
+        topic_match_score=0.8,
+        visual_quality_score=0.7,
+        audio_quality_score=0.6,
+        motion_energy_score=0.5,
+        text_relevance_score=0.7,
+        reference_style_fit_score=0.6,
+        source_safety_score=0.9,
+        overall_score=0.7,
+        reason="Ready",
+        status="selected",
+        recommended_rank=1,
+    )
+    board.candidate_review_queue[0].current_candidate = awaiting_candidate
+    board.candidate_review_queue[0].status = "awaiting_approval"
+
+    status = service.build_status(board)
+
+    assert status.current_status == "awaiting_approval"
+    assert status.current_candidate is not None
+    assert status.current_candidate.candidate_id == awaiting_candidate.candidate_id
+    assert status.current_slot_rank == 1
+
+
 def test_initialize_queue_creates_slots():
     service = CandidateReviewService()
     board = _research_board()
@@ -95,8 +131,9 @@ def test_approve_moves_to_next_slot():
     analyzed.title = "Clip B"
     analyzed.recommended_rank = 2
 
-    with patch(
-        "app.services.candidate_review_service.WebVideoFetchService.search_platform_urls",
+    with patch.object(
+        service,
+        "_search_platform_hits",
         new_callable=AsyncMock,
         return_value=[search_hit],
     ), patch(
@@ -108,13 +145,60 @@ def test_approve_moves_to_next_slot():
         "_analyze_candidate",
         new_callable=AsyncMock,
         return_value=analyzed,
+    ), patch.object(
+        service,
+        "_validate_local_candidate",
+        new_callable=AsyncMock,
+    ) as validate_mock, patch(
+        "app.services.candidate_review_service.should_use_lightweight_selection",
+        return_value=(False, []),
     ):
-        result = asyncio.run(service.approve_candidate(board, first_candidate.candidate_id))
+        from app.services.video_constraint_service import VideoFitEvaluation
+
+        validate_mock.return_value = VideoFitEvaluation(acceptable=True, fit_score=0.9)
+        approved_board = asyncio.run(service.approve_candidate(board, first_candidate.candidate_id))
+        result = asyncio.run(service.prepare_next_slot(approved_board))
 
     assert len(result.approved_candidates) == 1
     assert result.approved_candidates[0].candidate_id == first_candidate.candidate_id
     assert result.candidate_review_queue[0].status == "approved"
     assert result.candidate_review_queue[1].status == "awaiting_approval"
+
+
+def test_approve_is_idempotent_for_already_approved_candidate():
+    service = CandidateReviewService()
+    board = _research_board()
+    service.initialize_queue(board)
+
+    candidate = CandidateVideo(
+        candidate_id=new_id("cand"),
+        project_id=board.project_id,
+        title="Clip A",
+        source_type="public_url_reference",
+        source_url="https://www.youtube.com/watch?v=abc111",
+        local_file_path="/tmp/a.mp4",
+        concept="Concept A",
+        topic_match_score=0.8,
+        visual_quality_score=0.7,
+        audio_quality_score=0.6,
+        motion_energy_score=0.5,
+        text_relevance_score=0.7,
+        reference_style_fit_score=0.6,
+        source_safety_score=0.9,
+        overall_score=0.7,
+        reason="Ready",
+        status="approved",
+        recommended_rank=1,
+    )
+    board.candidate_review_queue[0].status = "approved"
+    board.candidate_review_queue[0].current_candidate = None
+    board.candidate_review_queue[0].approved_candidate = candidate
+    board.approved_candidates = [candidate]
+
+    result = asyncio.run(service.approve_candidate(board, candidate.candidate_id))
+
+    assert len(result.approved_candidates) == 1
+    assert result.candidate_review_queue[0].status == "approved"
 
 
 def test_reject_researches_same_slot():
@@ -159,7 +243,11 @@ def test_reject_researches_same_slot():
     )
 
     with patch(
-        "app.services.candidate_review_service.WebVideoFetchService.search_platform_urls",
+        "app.services.candidate_review_service.MAX_SEARCH_ATTEMPTS_PER_SLOT",
+        3,
+    ), patch.object(
+        service,
+        "_search_platform_hits",
         new_callable=AsyncMock,
         return_value=[search_hit],
     ) as search_mock, patch(
@@ -175,11 +263,15 @@ def test_reject_researches_same_slot():
         service,
         "_validate_local_candidate",
         new_callable=AsyncMock,
-    ) as validate_mock:
+    ) as validate_mock, patch(
+        "app.services.candidate_review_service.should_use_lightweight_selection",
+        return_value=(False, []),
+    ):
         from app.services.video_constraint_service import VideoFitEvaluation
 
         validate_mock.return_value = VideoFitEvaluation(acceptable=True, fit_score=0.9)
-        result = asyncio.run(service.reject_candidate(board, rejected_candidate.candidate_id))
+        rejected_board = asyncio.run(service.reject_candidate(board, rejected_candidate.candidate_id))
+        result = asyncio.run(service.prepare_next_slot(rejected_board))
 
     search_mock.assert_awaited()
     assert "https://www.youtube.com/watch?v=bad111" in result.candidate_review_queue[0].rejected_urls

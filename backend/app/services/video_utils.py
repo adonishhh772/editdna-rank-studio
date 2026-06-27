@@ -1,14 +1,71 @@
 import asyncio
 import json
+import logging
+import shutil
 import subprocess
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+logger = logging.getLogger(__name__)
+
+FFMPEG_BINARY_NAME = "ffmpeg"
+FFPROBE_BINARY_NAME = "ffprobe"
+DRAWTEXT_FILTER_NAME = "drawtext"
+
+FFMPEG_CANDIDATE_PATHS: tuple[str, ...] = (
+    FFMPEG_BINARY_NAME,
+    "/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg",
+    "/usr/local/opt/ffmpeg-full/bin/ffmpeg",
+)
+
+
+def _binary_is_executable(binary_path: str) -> bool:
+    if binary_path == FFMPEG_BINARY_NAME:
+        return True
+    return Path(binary_path).is_file()
+
+
+def _ffmpeg_has_filter(ffmpeg_binary: str, filter_name: str) -> bool:
+    result = subprocess.run(
+        [ffmpeg_binary, "-filters"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    return filter_name in result.stdout
+
+
+@lru_cache(maxsize=1)
+def resolve_ffmpeg_binary() -> str:
+    for candidate_path in FFMPEG_CANDIDATE_PATHS:
+        if not _binary_is_executable(candidate_path):
+            continue
+        if _ffmpeg_has_filter(candidate_path, DRAWTEXT_FILTER_NAME):
+            return candidate_path
+    return FFMPEG_BINARY_NAME
+
+
+@lru_cache(maxsize=1)
+def ffmpeg_supports_drawtext() -> bool:
+    return _ffmpeg_has_filter(resolve_ffmpeg_binary(), DRAWTEXT_FILTER_NAME)
+
+
+def resolve_ffprobe_binary() -> str:
+    ffmpeg_binary = resolve_ffmpeg_binary()
+    if ffmpeg_binary == FFMPEG_BINARY_NAME:
+        return FFPROBE_BINARY_NAME
+    return str(Path(ffmpeg_binary).with_name(FFPROBE_BINARY_NAME))
+
 
 async def run_ffmpeg_command(args: list[str]) -> None:
+    ffmpeg_binary = resolve_ffmpeg_binary()
+
     def execute() -> None:
         result = subprocess.run(
-            ["ffmpeg", "-y", *args],
+            [ffmpeg_binary, "-y", *args],
             capture_output=True,
             text=True,
             check=False,
@@ -20,10 +77,12 @@ async def run_ffmpeg_command(args: list[str]) -> None:
 
 
 async def get_video_dimensions(video_path: str) -> tuple[int | None, int | None]:
+    ffprobe_binary = resolve_ffprobe_binary()
+
     def probe() -> tuple[int | None, int | None]:
         result = subprocess.run(
             [
-                "ffprobe",
+                ffprobe_binary,
                 "-v",
                 "error",
                 "-select_streams",
@@ -59,10 +118,12 @@ async def get_video_dimensions(video_path: str) -> tuple[int | None, int | None]
 
 
 async def get_video_duration(video_path: str) -> float:
+    ffprobe_binary = resolve_ffprobe_binary()
+
     def probe() -> float:
         result = subprocess.run(
             [
-                "ffprobe",
+                ffprobe_binary,
                 "-v",
                 "error",
                 "-show_entries",
@@ -173,8 +234,17 @@ async def add_text_overlay(
     start_sec: float = 0.0,
     duration_sec: float = 2.0,
 ) -> str:
+    if not ffmpeg_supports_drawtext():
+        logger.warning(
+            "FFmpeg drawtext filter unavailable; skipping text overlay for %r. "
+            "Install ffmpeg-full for text labels: brew install ffmpeg-full",
+            text,
+        )
+        await asyncio.to_thread(shutil.copy2, source_path, output_path)
+        return output_path
+
     escaped = text.replace(":", "\\:").replace("'", "\\'")
-    drawtext = (
+    drawtext_filter = (
         f"drawtext=text='{escaped}':fontsize=48:fontcolor=white:"
         f"x=(w-text_w)/2:y=120:box=1:boxcolor=black@0.5:enable='between(t,{start_sec},{start_sec + duration_sec})'"
     )
@@ -183,7 +253,7 @@ async def add_text_overlay(
             "-i",
             source_path,
             "-vf",
-            drawtext,
+            drawtext_filter,
             "-c:a",
             "copy",
             output_path,

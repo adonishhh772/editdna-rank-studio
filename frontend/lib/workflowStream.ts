@@ -69,11 +69,16 @@ function parseSseChunk(chunk: string): WorkflowStreamEvent[] {
 export async function runWorkflowStream(
   path: string,
   onEvent: (event: WorkflowStreamEvent) => void,
+  body: Record<string, unknown> = {},
 ): Promise<Record<string, unknown> | null> {
   const separator = path.includes("?") ? "&" : "?";
   const response = await fetch(`${API_BASE}${path}${separator}stream=true`, {
     method: "POST",
-    headers: { Accept: "text/event-stream" },
+    headers: {
+      Accept: "text/event-stream",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
   });
 
   if (!response.ok) {

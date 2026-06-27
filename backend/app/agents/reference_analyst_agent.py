@@ -5,6 +5,7 @@ from app.agents.reference_format_detection_agent import ReferenceFormatDetection
 from app.agents.reference_structure_agent import ReferenceStructureAgent
 from app.agents.reference_video_probe_agent import ReferenceVideoProbeAgent
 from app.blackboard import ProjectBlackboard
+from app.services.video_analysis_store import save_reference_video_analysis
 from app.services.video_constraint_service import ReferenceVideoConstraints, constraints_summary
 
 
@@ -60,6 +61,7 @@ class ReferenceAnalystAgent(BaseAgent):
         if blackboard.reference_blueprint:
             constraints = ReferenceVideoConstraints.from_blueprint(blackboard.reference_blueprint)
             blackboard.memory_context["reference_video_constraints"] = constraints_summary(constraints)
+            save_reference_video_analysis(blackboard)
 
         blackboard.stage = "reference_analysed"
         blackboard = await memory_agent.execute(

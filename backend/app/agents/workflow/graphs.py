@@ -110,6 +110,7 @@ def _build_edit_plan_graph(
 
     return graph_builder.compile(
         checkpointer=checkpointer,
+        interrupt_after=[NODE_EDIT_PLAN_APPROVAL_GATE],
         name=STAGE_CREATE_EDIT_PLAN,
     )
 
@@ -158,6 +159,7 @@ def _build_regenerate_graph(
 
     return graph_builder.compile(
         checkpointer=checkpointer,
+        interrupt_after=[NODE_EDIT_PLAN_APPROVAL_GATE],
         name=STAGE_REGENERATE,
     )
 

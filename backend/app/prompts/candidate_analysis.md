@@ -14,6 +14,7 @@ Rules:
 - Place the window where the most relevant action, reveal, or payoff occurs for this concept/rank.
 - If the source is already short, use the full video (`clip_start_sec=0`, `clip_end_sec=duration_sec`).
 - Set `highlight_reason` explaining why this window matches the reference editing pattern.
+- Set `video_moment_title` to a short title (max 90 chars) describing what happens in the highlight window — not the source video title.
 
 Score topic match, visual quality, audio quality, motion energy, text relevance, reference style fit,
 and source safety from 0 to 1.

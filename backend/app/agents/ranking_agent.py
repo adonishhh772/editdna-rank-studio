@@ -2,6 +2,7 @@ from app.agents.base import BaseAgent
 from app.blackboard import ProjectBlackboard
 from app.constants.video_sources import is_platform_video_url
 from app.schemas import CandidateVideo
+from app.services.story_coherence_service import compute_weighted_overall_score
 
 
 class RankingAgent(BaseAgent):
@@ -9,15 +10,7 @@ class RankingAgent(BaseAgent):
     agent_name = "Ranking Agent"
 
     def _compute_score(self, candidate: CandidateVideo, memory_context: dict) -> float:
-        score = (
-            0.30 * candidate.topic_match_score
-            + 0.20 * candidate.visual_quality_score
-            + 0.15 * candidate.reference_style_fit_score
-            + 0.10 * candidate.motion_energy_score
-            + 0.10 * candidate.text_relevance_score
-            + 0.10 * candidate.source_safety_score
-            + 0.05 * candidate.audio_quality_score
-        )
+        score = compute_weighted_overall_score(candidate)
         memory_text = str(memory_context.get("final_answer", "")).lower()
         reason_lower = candidate.reason.lower()
         if "demo" in memory_text and ("demo" in reason_lower or candidate.visual_quality_score > 0.6):

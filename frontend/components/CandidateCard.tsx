@@ -8,6 +8,9 @@ type Candidate = {
   title: string;
   concept: string;
   reason: string;
+  highlight_reason?: string;
+  video_moment_title?: string;
+  story_coherence_score?: number;
   recommended_rank?: number;
   topic_match_score: number;
   reference_style_fit_score: number;
@@ -36,6 +39,9 @@ export function CandidateCard({
   onMoveDown,
 }: CandidateCardProps) {
   const previewUrl = resolveUploadMediaUrl(candidate.local_file_path);
+  const momentTitle = candidate.video_moment_title || candidate.highlight_reason || candidate.concept;
+  const storyCoherence = candidate.story_coherence_score ?? null;
+  const needsStoryImprovement = storyCoherence !== null && storyCoherence < 0.65;
 
   return (
     <div className="glass-card" data-testid={`candidate-card-${candidate.candidate_id}`}>
@@ -51,7 +57,8 @@ export function CandidateCard({
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <p className="text-xs uppercase tracking-wider text-neonBlue">Rank #{candidate.recommended_rank}</p>
-          <h3 className="text-lg font-semibold">{candidate.title}</h3>
+          <h3 className="text-lg font-semibold">{momentTitle}</h3>
+          <p className="mt-1 text-sm text-slate-500">Source: {candidate.title}</p>
           <p className="mt-1 text-sm text-slate-400">{candidate.concept}</p>
         </div>
         <div className="rounded-lg bg-neonPurple/20 px-3 py-1 text-sm font-bold text-neonPurple">
@@ -59,6 +66,11 @@ export function CandidateCard({
         </div>
       </div>
       <p className="mb-4 text-sm text-slate-300">{candidate.reason}</p>
+      {needsStoryImprovement && (
+        <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-amber-400" data-testid="candidate-story-warning">
+          Story mismatch — voiceover may not match this clip
+        </p>
+      )}
       {candidate.source_url && !previewUrl && (
         <p className="mb-4 truncate text-xs text-slate-500" title={candidate.source_url}>
           Source: {candidate.source_url}
@@ -67,6 +79,9 @@ export function CandidateCard({
       <div className="mb-4 grid grid-cols-2 gap-2 text-xs text-slate-400">
         <span>Topic: {(candidate.topic_match_score * 100).toFixed(0)}%</span>
         <span>Style: {(candidate.reference_style_fit_score * 100).toFixed(0)}%</span>
+        {storyCoherence !== null && (
+          <span>Story: {(storyCoherence * 100).toFixed(0)}%</span>
+        )}
       </div>
       <div className="flex flex-wrap gap-2">
         {!isReadOnly && (

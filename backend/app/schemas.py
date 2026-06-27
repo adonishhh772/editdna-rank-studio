@@ -174,6 +174,8 @@ class CandidateVideo(BaseModel):
     clip_start_sec: Optional[float] = None
     clip_end_sec: Optional[float] = None
     highlight_reason: Optional[str] = None
+    video_moment_title: Optional[str] = None
+    story_coherence_score: float = 0.0
     topic_match_score: float
     visual_quality_score: float
     audio_quality_score: float
@@ -221,6 +223,12 @@ class RankedClip(BaseModel):
     voiceover_text: Optional[str] = None
     caption_text: Optional[str] = None
     reason: str
+    highlight_reason: Optional[str] = None
+    video_moment_title: Optional[str] = None
+    source_video_title: Optional[str] = None
+    story_coherence_score: float = 0.0
+    needs_improvement: bool = False
+    analysis_scores: Dict[str, float] = Field(default_factory=dict)
 
 
 class EditPlan(BaseModel):
@@ -240,6 +248,9 @@ class EditPlan(BaseModel):
     render_settings: Dict[str, Any]
     reference_blueprint_applied: Dict[str, Any]
     memory_influence: Dict[str, Any]
+    video_insights: Dict[str, Any] = Field(default_factory=dict)
+    story_ready: bool = False
+    story_issues: List[str] = Field(default_factory=list)
     needs_human_approval: bool = True
 
 

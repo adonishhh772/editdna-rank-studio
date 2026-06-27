@@ -2,7 +2,7 @@ import asyncio
 import json
 import time
 from pathlib import Path
-from typing import Any, Type, TypeVar
+from typing import Any, Callable, Type, TypeVar
 
 from google import genai
 from google.genai import types
@@ -14,6 +14,30 @@ from app.constants.video_sources import is_single_youtube_video_url
 from app.schemas import CandidateVideo, ReferenceBlueprint
 
 T = TypeVar("T", bound=BaseModel)
+
+GEMINI_MAX_RETRIES = 3
+GEMINI_RETRY_BASE_DELAY_SEC = 2.0
+
+
+def _is_retryable_gemini_error(error: Exception) -> bool:
+    message = str(error).upper()
+    retry_markers = ("503", "UNAVAILABLE", "429", "TIMEOUT", "RESOURCE_EXHAUSTED")
+    return any(marker in message for marker in retry_markers)
+
+
+def _call_with_gemini_retries(operation: Callable[[], str]) -> str:
+    last_error: Exception | None = None
+    for attempt in range(GEMINI_MAX_RETRIES):
+        try:
+            return operation()
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_gemini_error(exc) or attempt >= GEMINI_MAX_RETRIES - 1:
+                raise
+            time.sleep(GEMINI_RETRY_BASE_DELAY_SEC * (2 ** attempt))
+    if last_error is not None:
+        raise last_error
+    raise RuntimeError("Gemini request failed")
 
 
 class GeminiVideoClient:
@@ -197,16 +221,18 @@ class GeminiVideoClient:
                 "(watch, shorts, or youtu.be). Playlists and channel pages are not supported."
             )
 
-        response = self.client.models.generate_content(
-            model=model,
-            contents=[
-                types.Part.from_uri(file_uri=video_url, mime_type="video/mp4"),
-                types.Part.from_text(text=prompt),
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_json_schema=schema.model_json_schema(),
-            ),
+        response = _call_with_gemini_retries(
+            lambda: self.client.models.generate_content(
+                model=model,
+                contents=[
+                    types.Part.from_uri(file_uri=video_url, mime_type="video/mp4"),
+                    types.Part.from_text(text=prompt),
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=schema.model_json_schema(),
+                ),
+            )
         )
         if not response.text:
             raise RuntimeError("Gemini returned empty response")
@@ -219,16 +245,18 @@ class GeminiVideoClient:
         schema: Type[T],
         model: str,
     ) -> str:
-        response = self.client.models.generate_content(
-            model=model,
-            contents=[
-                types.Part.from_uri(file_uri=active_file["uri"], mime_type=active_file["mime_type"]),
-                types.Part.from_text(text=prompt),
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_json_schema=schema.model_json_schema(),
-            ),
+        response = _call_with_gemini_retries(
+            lambda: self.client.models.generate_content(
+                model=model,
+                contents=[
+                    types.Part.from_uri(file_uri=active_file["uri"], mime_type=active_file["mime_type"]),
+                    types.Part.from_text(text=prompt),
+                ],
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=schema.model_json_schema(),
+                ),
+            )
         )
         if not response.text:
             raise RuntimeError("Gemini returned empty response")
@@ -255,13 +283,15 @@ class GeminiVideoClient:
             return schema.model_validate_json(repaired)
 
     def _generate_text_json_sync(self, prompt: str, schema: Type[T], model: str) -> str:
-        response = self.client.models.generate_content(
-            model=model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_json_schema=schema.model_json_schema(),
-            ),
+        response = _call_with_gemini_retries(
+            lambda: self.client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    response_mime_type="application/json",
+                    response_json_schema=schema.model_json_schema(),
+                ),
+            )
         )
         if not response.text:
             raise RuntimeError("Gemini returned empty response")

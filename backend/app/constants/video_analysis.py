@@ -1,0 +1,7 @@
+VIDEO_ANALYSES_MEMORY_KEY = "video_analyses"
+
+REFERENCE_ANALYSIS_TYPE = "reference"
+CANDIDATE_ANALYSIS_TYPE = "candidate"
+
+ANALYSIS_SOURCE_GEMINI = "gemini"
+ANALYSIS_SOURCE_LIGHTWEIGHT = "lightweight_preference"

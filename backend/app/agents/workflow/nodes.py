@@ -25,6 +25,12 @@ from app.db import new_id, save_blackboard
 from app.schemas import EditPlan, FeedbackEvent, RankedClip
 from app.constants.harness import HARNESS_ROUTE_CONTINUE, HARNESS_ROUTE_RETRY, MAX_HARNESS_REVISIONS
 from app.services.goal_harness import reset_moe_state_for_retry
+from app.services.renderer import VideoRenderer
+from app.services.story_coherence_service import (
+    enrich_ranked_clip_story_fields,
+    evaluate_edit_plan_story_coherence,
+)
+from app.services.video_analysis_store import build_edit_video_insights
 
 MAX_AGENT_RETRIES = 2
 
@@ -92,6 +98,17 @@ def apply_fusion_to_sections(
         caption_text = str(caption.get("caption_text", candidate.concept[:80]))
         voiceover_text = str(caption.get("voiceover_text", f"Number {rank}: {candidate.concept}"))
 
+        section_reason = candidate.highlight_reason or candidate.reason
+        analysis_scores = {
+            "topic_match": candidate.topic_match_score,
+            "visual_quality": candidate.visual_quality_score,
+            "audio_quality": candidate.audio_quality_score,
+            "motion_energy": candidate.motion_energy_score,
+            "text_relevance": candidate.text_relevance_score,
+            "reference_style_fit": candidate.reference_style_fit_score,
+            "overall": candidate.overall_score,
+        }
+
         sections.append(
             RankedClip(
                 rank=rank,
@@ -103,9 +120,12 @@ def apply_fusion_to_sections(
                 label_text=label_text,
                 voiceover_text=voiceover_text,
                 caption_text=caption_text,
-                reason=candidate.reason,
+                reason=section_reason,
+                highlight_reason=candidate.highlight_reason,
+                analysis_scores=analysis_scores,
             )
         )
+        sections[-1] = enrich_ranked_clip_story_fields(sections[-1], candidate)
         captions.append({"text": caption_text, "rank": rank})
         motion_plan.append(
             {
@@ -166,6 +186,9 @@ async def build_edit_plan_node(state: WorkflowState) -> dict[str, ProjectBlackbo
         avg_duration,
     )
 
+    video_insights = build_edit_video_insights(blackboard)
+    story_ready, story_issues = evaluate_edit_plan_story_coherence(sections)
+
     edit_plan = EditPlan(
         edit_plan_id=new_id("plan"),
         project_id=blackboard.project_id,
@@ -187,6 +210,9 @@ async def build_edit_plan_node(state: WorkflowState) -> dict[str, ProjectBlackbo
             "moe_fusion": blackboard.moe_fusion.model_dump() if blackboard.moe_fusion else {},
             "moe_routing": blackboard.moe_routing.model_dump() if blackboard.moe_routing else {},
         },
+        video_insights=video_insights,
+        story_ready=story_ready,
+        story_issues=story_issues,
         needs_human_approval=True,
     )
     blackboard.edit_plan = edit_plan
