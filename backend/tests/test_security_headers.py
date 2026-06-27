@@ -4,9 +4,11 @@ from app.constants.security_headers import (
     HEADER_CONTENT_SECURITY_POLICY,
     HEADER_PERMISSIONS_POLICY,
     HEADER_REFERRER_POLICY,
+    HEADER_STRICT_TRANSPORT_SECURITY,
     HEADER_X_CONTENT_TYPE_OPTIONS,
     HEADER_X_FRAME_OPTIONS,
     SECURITY_RESPONSE_HEADERS,
+    VALUE_STRICT_TRANSPORT_SECURITY,
 )
 from app.main import app
 
@@ -28,6 +30,12 @@ def test_content_security_policy_is_present_on_api_response() -> None:
     assert content_security_policy is not None
     assert "default-src 'none'" in content_security_policy
     assert "frame-ancestors 'none'" in content_security_policy
+
+
+def test_strict_transport_security_is_present_on_api_response() -> None:
+    response = client.get("/api/health")
+
+    assert response.headers.get(HEADER_STRICT_TRANSPORT_SECURITY) == VALUE_STRICT_TRANSPORT_SECURITY
 
 
 def test_additional_security_headers_are_set() -> None:

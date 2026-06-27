@@ -11,7 +11,10 @@ const CSP_DIRECTIVE_FORM_ACTION = "form-action 'self'";
 const CSP_DIRECTIVE_OBJECT_SRC = "object-src 'none'";
 
 const HEADER_CONTENT_SECURITY_POLICY = "Content-Security-Policy";
+const HEADER_STRICT_TRANSPORT_SECURITY = "Strict-Transport-Security";
 const HEADER_X_CONTENT_TYPE_OPTIONS = "X-Content-Type-Options";
+const HSTS_MAX_AGE_SECONDS = 31536000;
+const VALUE_STRICT_TRANSPORT_SECURITY = `max-age=${HSTS_MAX_AGE_SECONDS}; includeSubDomains`;
 const HEADER_X_FRAME_OPTIONS = "X-Frame-Options";
 const HEADER_REFERRER_POLICY = "Referrer-Policy";
 const HEADER_PERMISSIONS_POLICY = "Permissions-Policy";
@@ -65,6 +68,10 @@ export function buildSecurityHeaders(): SecurityHeader[] {
     {
       key: HEADER_CONTENT_SECURITY_POLICY,
       value: buildContentSecurityPolicy(apiOrigin),
+    },
+    {
+      key: HEADER_STRICT_TRANSPORT_SECURITY,
+      value: VALUE_STRICT_TRANSPORT_SECURITY,
     },
     { key: HEADER_X_CONTENT_TYPE_OPTIONS, value: "nosniff" },
     { key: HEADER_X_FRAME_OPTIONS, value: "DENY" },
