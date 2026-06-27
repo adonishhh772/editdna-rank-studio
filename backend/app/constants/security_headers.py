@@ -1,0 +1,26 @@
+HEADER_CONTENT_SECURITY_POLICY = "Content-Security-Policy"
+HEADER_X_CONTENT_TYPE_OPTIONS = "X-Content-Type-Options"
+HEADER_X_FRAME_OPTIONS = "X-Frame-Options"
+HEADER_REFERRER_POLICY = "Referrer-Policy"
+HEADER_PERMISSIONS_POLICY = "Permissions-Policy"
+
+VALUE_X_CONTENT_TYPE_OPTIONS = "nosniff"
+VALUE_X_FRAME_OPTIONS = "DENY"
+VALUE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+VALUE_PERMISSIONS_POLICY = "camera=(), microphone=(), geolocation=()"
+
+API_CONTENT_SECURITY_POLICY = (
+    "default-src 'none'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'none'; "
+    "form-action 'none'; "
+    "object-src 'none'"
+)
+
+SECURITY_RESPONSE_HEADERS: dict[str, str] = {
+    HEADER_CONTENT_SECURITY_POLICY: API_CONTENT_SECURITY_POLICY,
+    HEADER_X_CONTENT_TYPE_OPTIONS: VALUE_X_CONTENT_TYPE_OPTIONS,
+    HEADER_X_FRAME_OPTIONS: VALUE_X_FRAME_OPTIONS,
+    HEADER_REFERRER_POLICY: VALUE_REFERRER_POLICY,
+    HEADER_PERMISSIONS_POLICY: VALUE_PERMISSIONS_POLICY,
+}

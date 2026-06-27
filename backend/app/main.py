@@ -10,6 +10,7 @@ from app.agents.workflow.checkpointer import close_checkpointer, init_checkpoint
 from app.agents.workflow.runner import LangGraphRunner
 from app.config import get_settings
 from app.db import init_db
+from app.middleware.security_headers_middleware import SecurityHeadersMiddleware
 from app.routes import projects as projects_routes
 from app.routes.projects import router as projects_router
 from app.services.api_status_service import build_api_status_response
@@ -32,6 +33,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="EditDNA Rank Studio", version="0.1.0", lifespan=lifespan)
 
+app.add_middleware(SecurityHeadersMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"http://(localhost|127\.0\.0\.1|192\.168\.\d{1,3}\.\d{1,3})(:\d+)?",
