@@ -1,0 +1,20 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  background: radial-gradient(circle at top, rgba(59, 130, 246, 0.12), transparent 40%),
+    #0a0a1a;
+}
+
+.glass-card {
+  @apply rounded-2xl border border-white/10 bg-white/5 p-6 backdrop-blur-xl shadow-2xl;
+}
+
+.glass-button {
+  @apply rounded-xl border border-white/10 bg-white/10 px-4 py-2 font-medium transition hover:bg-white/20 active:scale-95;
+}
+
+.glass-input {
+  @apply w-full rounded-xl border border-white/10 bg-white/5 px-4 py-3 outline-none ring-0 focus:border-neonBlue/60;
+}

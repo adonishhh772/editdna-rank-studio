@@ -1,0 +1,37 @@
+NODE_REFERENCE_ANALYST = "reference_analyst"
+NODE_TOPIC = "topic"
+NODE_MEMORY_RECALL = "memory_recall"
+NODE_TAVILY_RESEARCH = "tavily_research"
+NODE_CANDIDATE_DISCOVERY = "candidate_discovery"
+NODE_PLATFORM_VIDEO_SEARCH = "platform_video_search"
+NODE_PLATFORM_VIDEO_DOWNLOAD_POOL = "platform_video_download_pool"
+NODE_CANDIDATE_ANALYSIS = "candidate_analysis"
+NODE_RANKING = "ranking"
+NODE_CANDIDATE_APPROVAL_GATE = "candidate_approval_gate"
+NODE_PLATFORM_VIDEO_DOWNLOAD_APPROVED = "platform_video_download_approved"
+NODE_MOE_PIPELINE = "moe_pipeline"
+NODE_FUSION = "fusion"
+NODE_BUILD_EDIT_PLAN = "build_edit_plan"
+NODE_SLNG_AUDIO = "slng_audio"
+NODE_CRITIC = "critic"
+NODE_EDIT_PLAN_APPROVAL_GATE = "edit_plan_approval_gate"
+NODE_RENDER = "render"
+NODE_COMPARISON = "comparison"
+NODE_PREPARE_REGENERATE = "prepare_regenerate"
+NODE_PREPARE_HARNESS_RETRY = "prepare_harness_retry"
+NODE_FEEDBACK_MEMORY = "feedback_memory"
+
+HUMAN_INTERRUPT_NODES = (
+    NODE_CANDIDATE_APPROVAL_GATE,
+    NODE_EDIT_PLAN_APPROVAL_GATE,
+)
+
+STAGE_ANALYSE_REFERENCE = "analyse_reference"
+STAGE_RESEARCH_TOPIC = "research_topic"
+STAGE_DISCOVER_CANDIDATES = "discover_candidates"
+STAGE_SELECT_RANKING = "select_ranking"
+STAGE_CREATE_EDIT_PLAN = "create_edit_plan"
+STAGE_RENDER = "render"
+STAGE_COMPARE = "compare"
+STAGE_REGENERATE = "regenerate"
+STAGE_FEEDBACK = "feedback"
