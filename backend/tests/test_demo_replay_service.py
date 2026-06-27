@@ -25,7 +25,14 @@ async def test_analyse_reference_builds_blueprint_with_pack_ranking_count():
     assert updated.reference_blueprint.ranking_count == 5
     assert updated.stage == "reference_analysed"
     assert len(updated.traces) >= 4
-    assert updated.memory_context.get("demo_mode") is True
+    assert updated.memory_context.get("demo_mode") is not True
+    memory_text = " ".join(
+        str(item.get("content", ""))
+        for update in updated.memory_updates
+        for field in ("short_term_updates", "episodic_updates", "long_term_updates")
+        for item in (update.get(field) or [])
+    )
+    assert "3D" not in memory_text
 
 
 @pytest.mark.asyncio

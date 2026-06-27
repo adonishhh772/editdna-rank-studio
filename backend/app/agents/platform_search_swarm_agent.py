@@ -20,7 +20,7 @@ def resolve_search_constraints(
 
 class YouTubeShortsSearchAgent(BaseAgent):
     agent_id = "youtube_shorts_search"
-    agent_name = "YouTube Shorts Search"
+    agent_name = "Tavily YouTube Search"
 
     async def run(self, blackboard: ProjectBlackboard) -> ProjectBlackboard:
         request = blackboard.memory_context.get("_platform_search_request", {})

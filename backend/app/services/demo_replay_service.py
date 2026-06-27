@@ -602,17 +602,23 @@ class DemoReplayService:
             min_source_duration_sec=2.0,
         )
 
-    def _seed_memory_context(self, blackboard: ProjectBlackboard) -> None:
+    def _seed_memory_context(
+        self,
+        blackboard: ProjectBlackboard,
+        *,
+        include_topic_preference: bool = False,
+    ) -> None:
         blackboard.memory_context.setdefault("demo_mode", True)
         blackboard.memory_context.setdefault("demo_pack_id", self.pack.pack_id)
-        blackboard.memory_context.setdefault(
-            "recalled_preferences",
-            {
-                "preferred_format": "shorts",
-                "preferred_orientation": "mobile",
-                "topic": self.pack.topic,
-            },
-        )
+        if include_topic_preference:
+            blackboard.memory_context.setdefault(
+                "recalled_preferences",
+                {
+                    "preferred_format": "shorts",
+                    "preferred_orientation": "mobile",
+                    "topic": self.pack.topic,
+                },
+            )
 
     async def analyse_reference(self, blackboard: ProjectBlackboard) -> ProjectBlackboard:
         if not blackboard.reference_video_url and not blackboard.reference_video_path:
@@ -694,11 +700,15 @@ class DemoReplayService:
         )
         save_blackboard(blackboard)
         await self.delay()
-        self._seed_memory_context(blackboard)
         self._append_memory_update(
             blackboard,
-            short_term=[{"content": f"Reference blueprint stored for {self.pack.topic}", "type": "reference_dna"}],
-            episodic=[{"content": f"User prefers Shorts ranking style like {self.pack.topic}"}],
+            short_term=[
+                {
+                    "content": "Reference blueprint stored — editing DNA captured from source video",
+                    "type": "reference_dna",
+                }
+            ],
+            episodic=[{"content": "Reference video is a vertical Shorts ranking format"}],
             summary="Reference editing DNA saved to memory",
         )
         self._complete_trace(
@@ -740,7 +750,7 @@ class DemoReplayService:
         )
         save_blackboard(blackboard)
         await self.delay()
-        self._seed_memory_context(blackboard)
+        self._seed_memory_context(blackboard, include_topic_preference=True)
         self._complete_trace(
             recall_trace,
             output_summary="Recalled memory context",
@@ -826,17 +836,27 @@ class DemoReplayService:
         search_query = f"{slot_concept} {topic} shorts"
         url_suffix = "reject" if is_reject_variant else "approved"
 
-        search_trace = self._start_trace(
+        swarm_parent_id = "platform_search_swarm"
+        swarm_trace = self._start_trace(
             blackboard,
-            agent_id=DEMO_AGENT_PLATFORM_VIDEO_SEARCH,
-            agent_name="Platform Video Search",
-            input_summary=f"Searching for slot #{rank_number}: {slot_concept}",
-            visible_reasoning=f"Querying YouTube Shorts for '{search_query}'.",
+            agent_id=swarm_parent_id,
+            agent_name="Platform Search Swarm",
+            input_summary=f"Searching platforms for slot #{rank_number}: {slot_concept}",
+            visible_reasoning="Coordinating Tavily-powered YouTube Shorts search.",
+            metadata={"swarm": True, "slot_rank": rank_number},
+        )
+        tavily_trace = self._start_swarm_child_trace(
+            blackboard,
+            parent_agent_id=swarm_parent_id,
+            agent_id="youtube_shorts_search",
+            agent_name="Tavily YouTube Search",
+            input_summary=f"Tavily search for slot #{rank_number}: {slot_concept}",
+            visible_reasoning=f"Running Tavily YouTube Shorts search for '{search_query}'.",
         )
         self._append_download_event(
             blackboard,
-            agent_id=DEMO_AGENT_PLATFORM_VIDEO_SEARCH,
-            agent_name="Platform Video Search",
+            agent_id="youtube_shorts_search",
+            agent_name="Tavily YouTube Search",
             concept=slot_concept,
             stage="search_started",
             search_query=search_query,
@@ -848,8 +868,8 @@ class DemoReplayService:
         fake_source_url = f"{self.pack.youtube_url}#demo_rank_{rank_number}_{url_suffix}"
         self._append_download_event(
             blackboard,
-            agent_id=DEMO_AGENT_PLATFORM_VIDEO_SEARCH,
-            agent_name="Platform Video Search",
+            agent_id="youtube_shorts_search",
+            agent_name="Tavily YouTube Search",
             concept=slot_concept,
             stage="url_selected",
             search_query=search_query,
@@ -857,13 +877,19 @@ class DemoReplayService:
             platform="youtube",
         )
         self._complete_trace(
-            search_trace,
-            output_summary="Selected demo clip URL",
+            tavily_trace,
+            output_summary="Selected demo clip URL via Tavily",
             visible_reasoning=(
-                "Clip found, but topic match is too weak for this ranking slot."
+                "Tavily found a clip, but topic match is too weak for this ranking slot."
                 if is_reject_variant
-                else "Found a Shorts clip matching reference constraints."
+                else "Tavily found a Shorts clip matching reference constraints."
             ),
+        )
+        self._complete_trace(
+            swarm_trace,
+            output_summary="Platform search swarm complete",
+            visible_reasoning="Tavily YouTube search finished for this slot.",
+            tool_calls=[{"tool": "demo_tavily_youtube_search", "slot_rank": rank_number}],
         )
         save_blackboard(blackboard)
         await self.delay(DEMO_CANDIDATE_STEP_DELAY_SEC)

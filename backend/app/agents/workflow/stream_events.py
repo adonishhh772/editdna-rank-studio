@@ -48,7 +48,7 @@ NODE_DISPLAY_LABELS: dict[str, str] = {
     "tavily_topic_search": "Searching web for concepts",
     "tavily_deep_research": "Running deep research",
     "platform_search_swarm": "Searching YouTube + TikTok",
-    "youtube_shorts_search": "Searching YouTube Shorts",
+    "youtube_shorts_search": "Tavily YouTube search",
     "tiktok_search": "Searching TikTok clips",
     "preference_auto_select": "Auto-selecting from learned preferences",
     NODE_CANDIDATE_DISCOVERY: "Building candidate list",

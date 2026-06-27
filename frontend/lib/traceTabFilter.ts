@@ -38,6 +38,10 @@ const TAB_AGENT_IDS: Record<ProjectWorkflowTab, readonly string[]> = {
   ],
   candidates: [
     "candidate_discovery",
+    "candidate_video_fetch",
+    "platform_search_swarm",
+    "youtube_shorts_search",
+    "tiktok_search",
     "platform_video_search",
     "platform_video_download",
     "candidate_visual_analysis",

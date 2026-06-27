@@ -23,8 +23,17 @@ describe("traceTabFilter", () => {
   });
 
   it("shows only candidate traces on the candidates tab", () => {
-    const filtered = filterTracesForTab(traces, "candidates");
-    expect(filtered.map((trace) => trace.agent_id)).toEqual(["platform_video_search"]);
+    const extendedTraces = [
+      ...traces,
+      { agent_id: "platform_search_swarm", metadata: { swarm: true } },
+      { agent_id: "youtube_shorts_search", metadata: { parent_agent_id: "platform_search_swarm" } },
+    ];
+    const filtered = filterTracesForTab(extendedTraces, "candidates");
+    expect(filtered.map((trace) => trace.agent_id)).toEqual([
+      "platform_video_search",
+      "platform_search_swarm",
+      "youtube_shorts_search",
+    ]);
   });
 
   it("shows only render traces on the review tab", () => {
