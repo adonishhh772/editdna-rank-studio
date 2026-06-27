@@ -233,6 +233,7 @@ async def add_text_overlay(
     text: str,
     start_sec: float = 0.0,
     duration_sec: float = 2.0,
+    font_size: int = 48,
 ) -> str:
     if not ffmpeg_supports_drawtext():
         logger.warning(
@@ -245,7 +246,7 @@ async def add_text_overlay(
 
     escaped = text.replace(":", "\\:").replace("'", "\\'")
     drawtext_filter = (
-        f"drawtext=text='{escaped}':fontsize=48:fontcolor=white:"
+        f"drawtext=text='{escaped}':fontsize={font_size}:fontcolor=white:"
         f"x=(w-text_w)/2:y=120:box=1:boxcolor=black@0.5:enable='between(t,{start_sec},{start_sec + duration_sec})'"
     )
     await run_ffmpeg_command(

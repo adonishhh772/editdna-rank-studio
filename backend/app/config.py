@@ -25,6 +25,8 @@ class Settings:
         self.upload_dir: Path = ROOT_DIR / os.getenv("UPLOAD_DIR", "./uploads")
         self.output_dir: Path = ROOT_DIR / os.getenv("OUTPUT_DIR", "./outputs")
         self.asset_library_dir: Path = ROOT_DIR / os.getenv("ASSET_LIBRARY_DIR", "./sample_assets")
+        self.demo_packs_dir: Path = ROOT_DIR / os.getenv("DEMO_PACKS_DIR", "./demo_packs")
+        self.demo_mode: str = os.getenv("DEMO_MODE", "").strip().lower()
         self.allow_demo_fallback: bool = os.getenv("ALLOW_DEMO_FALLBACK", "false").lower() == "true"
         self.gemini_reference_model: str = os.getenv("GEMINI_REFERENCE_MODEL", "gemini-2.5-flash")
         self.gemini_candidate_model: str = os.getenv("GEMINI_CANDIDATE_MODEL", "gemini-2.5-flash")
@@ -36,6 +38,7 @@ class Settings:
         self.upload_dir.mkdir(parents=True, exist_ok=True)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.asset_library_dir.mkdir(parents=True, exist_ok=True)
+        self.demo_packs_dir.mkdir(parents=True, exist_ok=True)
 
     def missing_keys(self) -> list[str]:
         missing: list[str] = []

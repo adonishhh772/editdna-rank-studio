@@ -2,6 +2,8 @@ from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, RedirectResponse, StreamingResponse
 
 from app.agents.orchestrator import LangGraphRunner
+from app.agents.demo_workflow_runner import DemoWorkflowRunner
+from app.services.demo_pack_loader import is_demo_mode_active
 from app.constants.workflow import (
     STAGE_ANALYSE_REFERENCE,
     STAGE_COMPARE,
@@ -16,7 +18,7 @@ from app.constants.workflow import (
 from app.routes.review_streaming import run_review_or_stream
 from app.routes.workflow_streaming import run_stage_or_stream
 from app.services.preference_learning_service import summarize_preferences_for_ui
-from app.config import get_settings
+from app.services.api_status_service import build_api_status_response
 from app.constants.video_sources import validate_reference_video_url
 from app.db import delete_project, list_projects, load_blackboard, new_id, save_blackboard, utc_now
 from app.schemas import (
@@ -36,7 +38,7 @@ from app.services.asset_store import AssetStore
 from app.services.reference_media_service import ensure_reference_local_path
 
 router = APIRouter(prefix="/api/projects", tags=["projects"])
-orchestrator: LangGraphRunner | None = None
+orchestrator: LangGraphRunner | DemoWorkflowRunner | None = None
 approval_service = ApprovalService()
 asset_store = AssetStore()
 
@@ -48,24 +50,20 @@ def get_board(project_id: str):
     return board
 
 
-def get_orchestrator() -> LangGraphRunner:
-    if orchestrator is None:
-        return LangGraphRunner()
+def get_orchestrator() -> LangGraphRunner | DemoWorkflowRunner:
+    global orchestrator
+    if is_demo_mode_active():
+        if orchestrator is None or not isinstance(orchestrator, DemoWorkflowRunner):
+            orchestrator = DemoWorkflowRunner()
+        return orchestrator
+    if orchestrator is None or isinstance(orchestrator, DemoWorkflowRunner):
+        orchestrator = LangGraphRunner()
     return orchestrator
 
 
 @router.get("/status/integrations")
-async def integration_status() -> ApiStatusResponse:
-    settings = get_settings()
-    missing = settings.missing_keys()
-    return ApiStatusResponse(
-        gemini=bool(settings.gemini_api_key),
-        tavily=bool(settings.tavily_api_key),
-        slng=bool(settings.slng_api_key),
-        mubit=bool(settings.mubit_api_key),
-        missing_keys=missing,
-        allow_demo_fallback=settings.allow_demo_fallback,
-    )
+async def integration_status(probe: bool = Query(default=False)) -> ApiStatusResponse:
+    return await build_api_status_response(probe=probe)
 
 
 @router.post("")
@@ -378,16 +376,35 @@ async def render_video(project_id: str, stream: bool = Query(default=False)):
 
 @router.post("/{project_id}/feedback/text")
 async def text_feedback(project_id: str, payload: TextFeedbackRequest):
+    from app.constants.feedback import (
+        FEEDBACK_TYPE_NEGATIVE,
+        FEEDBACK_TYPE_POSITIVE,
+        FEEDBACK_TYPE_TEXT,
+    )
+    from app.services.feedback_learning_service import classify_feedback_sentiment
+
     board = get_board(project_id)
+    resolved_type = payload.feedback_type
+    if resolved_type == FEEDBACK_TYPE_TEXT:
+        sentiment = classify_feedback_sentiment(payload.feedback_text, resolved_type)
+        if sentiment == "positive":
+            resolved_type = FEEDBACK_TYPE_POSITIVE
+        elif sentiment == "negative":
+            resolved_type = FEEDBACK_TYPE_NEGATIVE
+
     feedback = FeedbackEvent(
         feedback_id=new_id("fb"),
         project_id=project_id,
         run_id=board.run_id,
         user_id=payload.user_id,
-        feedback_type=payload.feedback_type,
+        feedback_type=resolved_type,
         target_type=payload.target_type,
         target_id=payload.target_id,
         feedback_text=payload.feedback_text,
+        after_state={
+            "source_stage": payload.source_stage,
+            "sentiment": classify_feedback_sentiment(payload.feedback_text, resolved_type),
+        },
         created_at=utc_now(),
     )
     board = await get_orchestrator().apply_feedback_and_learn(board, feedback)
@@ -431,6 +448,8 @@ async def regenerate(project_id: str):
 @router.post("/{project_id}/final-approve")
 async def final_approve(project_id: str):
     board = get_board(project_id)
+    if board.stage == "final_approved" and board.comparison_report is not None:
+        return board.model_dump()
     feedback = FeedbackEvent(
         feedback_id=new_id("fb"),
         project_id=project_id,

@@ -4,15 +4,24 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { Clapperboard, Sparkles, Wand2 } from "lucide-react";
 import { SavedProjectsPanel } from "@/components/SavedProjectsPanel";
+import { IntegrationStatusPanel } from "@/components/IntegrationStatusPanel";
 import { getIntegrationStatus } from "@/lib/api";
+import type { IntegrationHealthItem } from "@/lib/integrationHealth";
 
 export default function LandingPage() {
   const [missingKeys, setMissingKeys] = useState<string[]>([]);
+  const [integrations, setIntegrations] = useState<IntegrationHealthItem[]>([]);
+  const [integrationsLoading, setIntegrationsLoading] = useState(true);
 
   useEffect(() => {
-    getIntegrationStatus()
-      .then((status) => setMissingKeys(status.missing_keys || []))
-      .catch(() => setMissingKeys(["API unreachable"]));
+    setIntegrationsLoading(true);
+    getIntegrationStatus(true)
+      .then((status) => {
+        setMissingKeys(status.missing_keys || []);
+        setIntegrations((status.integrations as IntegrationHealthItem[]) || []);
+      })
+      .catch(() => setMissingKeys(["API unreachable"]))
+      .finally(() => setIntegrationsLoading(false));
   }, []);
 
   return (
@@ -42,6 +51,7 @@ export default function LandingPage() {
               Missing API keys: {missingKeys.map((key) => `Missing ${key}`).join(", ")}
             </div>
           )}
+          <IntegrationStatusPanel integrations={integrations} isLoading={integrationsLoading} />
           <div className="mt-10 grid gap-4 md:grid-cols-3">
             {[
               "Gemini video understanding",

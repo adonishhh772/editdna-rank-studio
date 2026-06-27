@@ -34,9 +34,15 @@ class ComparisonAgent(BaseAgent):
             for item in update.get("long_term_updates", []):
                 learned.append(item.get("content", ""))
 
+        seen_improvements: set[str] = set()
         for feedback in blackboard.feedback_events:
-            if feedback.feedback_text:
-                improvements.append(f"Applied feedback: {feedback.feedback_text}")
+            if not feedback.feedback_text:
+                continue
+            label = f"Applied feedback: {feedback.feedback_text}"
+            if label in seen_improvements:
+                continue
+            seen_improvements.add(label)
+            improvements.append(label)
 
         report = ComparisonReport(
             project_id=blackboard.project_id,

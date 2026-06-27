@@ -30,7 +30,7 @@ from app.services.candidate_preference_service import (
 from app.services.preference_learning_service import compute_preference_learning_adjustment
 from app.services.video_constraint_service import ReferenceVideoConstraints, evaluate_video_fit
 from app.services.video_format_detection import probe_platform_video_metadata
-from app.services.ytdlp_command import build_ytdlp_download_args
+from app.services.ytdlp_command import build_ytdlp_download_args, impersonation_available
 
 
 @dataclass
@@ -287,6 +287,17 @@ class WebVideoFetchService:
         subdir: str = "candidates",
     ) -> DownloadAttemptResult:
         platform = detect_platform_name(page_url)
+        if platform == "tiktok" and not impersonation_available():
+            return DownloadAttemptResult(
+                success=False,
+                source_url=page_url,
+                platform=platform,
+                error=(
+                    "TikTok downloads require curl-cffi for browser impersonation. "
+                    "Install with: pip install 'curl-cffi>=0.10.0,<0.14'"
+                ),
+                method="yt-dlp",
+            )
         local_path, stderr, error = await self._download_with_ytdlp(
             project_id=project_id,
             page_url=page_url,
@@ -397,6 +408,7 @@ class WebVideoFetchService:
         candidate_dir = self.settings.upload_dir / project_id / subdir
         candidate_dir.mkdir(parents=True, exist_ok=True)
         output_template = str(candidate_dir / filename_hint.replace(".mp4", ".%(ext)s"))
+        self._cleanup_stale_part_files(candidate_dir, Path(filename_hint).stem)
 
         def run_ytdlp() -> tuple[str | None, str | None, str | None]:
             command = build_ytdlp_download_args(output_template, page_url)
@@ -417,6 +429,11 @@ class WebVideoFetchService:
             return None, result.stderr, "No output file produced"
 
         return await asyncio.to_thread(run_ytdlp)
+
+    @staticmethod
+    def _cleanup_stale_part_files(candidate_dir: Path, filename_stem: str) -> None:
+        for stale_part in candidate_dir.glob(f"{filename_stem}*.part"):
+            stale_part.unlink(missing_ok=True)
 
     async def _download_direct_file(
         self,

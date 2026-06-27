@@ -5,6 +5,12 @@ uploads/*
 !uploads/.gitkeep
 outputs/*
 !outputs/.gitkeep
+backend/outputs/*
+!backend/outputs/.gitkeep
+
+frontend/tsconfig.tsbuildinfo
+
+demo_packs/
 
 backend/.venv/
 backend/venv/

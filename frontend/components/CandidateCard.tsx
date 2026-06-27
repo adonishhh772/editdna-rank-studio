@@ -23,6 +23,7 @@ type CandidateCardProps = {
   candidate: Candidate;
   isBusy?: boolean;
   isReadOnly?: boolean;
+  variant?: "default" | "rejected";
   onApprove: (candidateId: string) => void;
   onReject: (candidateId: string) => void;
   onMoveUp: (candidateId: string) => void;
@@ -33,18 +34,34 @@ export function CandidateCard({
   candidate,
   isBusy = false,
   isReadOnly = false,
+  variant = "default",
   onApprove,
   onReject,
   onMoveUp,
   onMoveDown,
 }: CandidateCardProps) {
   const previewUrl = resolveUploadMediaUrl(candidate.local_file_path);
-  const momentTitle = candidate.video_moment_title || candidate.highlight_reason || candidate.concept;
+  const displayTitle = candidate.title.trim() || candidate.concept;
+  const showConceptSubtitle =
+    candidate.concept.trim().length > 0 && candidate.concept.trim() !== displayTitle;
   const storyCoherence = candidate.story_coherence_score ?? null;
   const needsStoryImprovement = storyCoherence !== null && storyCoherence < 0.65;
 
+  const isRejectedVariant = variant === "rejected";
+
   return (
-    <div className="glass-card" data-testid={`candidate-card-${candidate.candidate_id}`}>
+    <div
+      className={`glass-card ${isRejectedVariant ? "border-pink-500/30" : ""}`}
+      data-testid={`candidate-card-${candidate.candidate_id}`}
+    >
+      {isRejectedVariant && (
+        <p
+          className="mb-3 text-xs font-bold uppercase tracking-wider text-pink-400"
+          data-testid={`candidate-rejected-badge-${candidate.candidate_id}`}
+        >
+          Rejected
+        </p>
+      )}
       {previewUrl && (
         <video
           className="mb-4 w-full rounded-xl border border-white/10"
@@ -56,10 +73,17 @@ export function CandidateCard({
       )}
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
-          <p className="text-xs uppercase tracking-wider text-neonBlue">Rank #{candidate.recommended_rank}</p>
-          <h3 className="text-lg font-semibold">{momentTitle}</h3>
-          <p className="mt-1 text-sm text-slate-500">Source: {candidate.title}</p>
-          <p className="mt-1 text-sm text-slate-400">{candidate.concept}</p>
+          {candidate.recommended_rank != null && (
+            <p className="text-xs uppercase tracking-wider text-neonBlue">
+              Rank #{candidate.recommended_rank}
+            </p>
+          )}
+          <h3 className="text-lg font-semibold" data-testid={`candidate-title-${candidate.candidate_id}`}>
+            {displayTitle}
+          </h3>
+          {showConceptSubtitle && (
+            <p className="mt-1 text-sm text-slate-400">{candidate.concept}</p>
+          )}
         </div>
         <div className="rounded-lg bg-neonPurple/20 px-3 py-1 text-sm font-bold text-neonPurple">
           {(candidate.overall_score * 100).toFixed(0)}

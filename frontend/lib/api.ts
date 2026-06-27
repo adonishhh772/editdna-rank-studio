@@ -24,6 +24,9 @@ export function getApiErrorMessage(error: unknown, fallback: string): string {
     if (typeof detail === "string") {
       return detail;
     }
+    if (!error.response) {
+      return "Cannot reach the API server. Confirm the backend is running on port 8000 and reload the page.";
+    }
   }
   if (error instanceof Error) {
     return error.message;
@@ -158,9 +161,16 @@ export async function renderVideo(projectId: string) {
   return data;
 }
 
-export async function submitTextFeedback(projectId: string, feedbackText: string) {
+export async function submitTextFeedback(
+  projectId: string,
+  feedbackText: string,
+  feedbackType: string = "text_feedback",
+  sourceStage?: string,
+) {
   const { data } = await api.post<ProjectBlackboard>(`/api/projects/${projectId}/feedback/text`, {
     feedback_text: feedbackText,
+    feedback_type: feedbackType,
+    source_stage: sourceStage,
   });
   return data;
 }
@@ -195,8 +205,10 @@ export async function getMemory(projectId: string) {
   return data;
 }
 
-export async function getIntegrationStatus() {
-  const { data } = await api.get("/api/health");
+export async function getIntegrationStatus(probe: boolean = true) {
+  const { data } = await api.get("/api/health", {
+    params: probe ? { probe: true } : undefined,
+  });
   return data;
 }
 

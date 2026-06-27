@@ -7,8 +7,9 @@ import { MemoryPanel } from "@/components/MemoryPanel";
 import { ProjectShell } from "@/components/ProjectShell";
 import { ScoreCard } from "@/components/ScoreCard";
 import { VideoPreview } from "@/components/VideoPreview";
-import { getComparison, getMemory, getProject, getTraces } from "@/lib/api";
+import { getApiErrorMessage, getComparison, getMemory, getProject, getTraces } from "@/lib/api";
 import { resolveOutputMediaUrl, resolveReferenceMediaUrl } from "@/lib/mediaUrl";
+import { filterTracesForTab } from "@/lib/traceTabFilter";
 
 export default function ComparisonPage() {
   const params = useParams();
@@ -17,16 +18,27 @@ export default function ComparisonPage() {
   const [comparison, setComparison] = useState<Record<string, unknown> | null>(null);
   const [traces, setTraces] = useState([]);
   const [memory, setMemory] = useState<Record<string, unknown>>({ memory_context: {}, memory_updates: [] });
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    Promise.all([getProject(projectId), getComparison(projectId), getTraces(projectId), getMemory(projectId)]).then(
-      ([projectData, comparisonData, traceData, memoryData]) => {
+    const loadComparison = async () => {
+      setError(null);
+      try {
+        const [projectData, comparisonData, traceData, memoryData] = await Promise.all([
+          getProject(projectId),
+          getComparison(projectId),
+          getTraces(projectId),
+          getMemory(projectId),
+        ]);
         setProject(projectData);
         setComparison(comparisonData);
         setTraces(traceData);
         setMemory(memoryData);
-      },
-    );
+      } catch (loadError) {
+        setError(getApiErrorMessage(loadError, "Failed to load comparison data"));
+      }
+    };
+    loadComparison();
   }, [projectId]);
 
   const referencePreviewUrl = resolveReferenceMediaUrl(
@@ -39,14 +51,17 @@ export default function ComparisonPage() {
     project?.output_video_path as string | undefined,
   );
 
+  const displayTraces = filterTracesForTab(traces, "comparison");
+
   return (
     <ProjectShell active="comparison">
       <div className="grid gap-6 lg:grid-cols-[280px_1fr_280px]">
-        <AgentTracePanel traces={traces} />
+        <AgentTracePanel traces={displayTraces} />
         <div className="space-y-6">
           <div className="glass-card">
             <h1 className="text-3xl font-bold">Reference vs Generated</h1>
             <p className="mt-2 text-slate-400">Comparison scores, improvements, and learned preferences.</p>
+            {error && <p className="mt-2 text-sm text-pink-400">{error}</p>}
           </div>
           <div className="grid gap-6 md:grid-cols-2">
             <VideoPreview title="Reference" src={referencePreviewUrl} />
@@ -85,8 +100,8 @@ function ListBlock({ title, items }: { title: string; items: string[] }) {
       <h3 className="mb-2 text-sm font-semibold uppercase tracking-wider text-slate-400">{title}</h3>
       <ul className="space-y-2 text-sm text-slate-300">
         {items.length === 0 && <li className="text-slate-500">None yet.</li>}
-        {items.map((item) => (
-          <li key={item}>- {item}</li>
+        {items.map((item, index) => (
+          <li key={`${title}-${index}`}>- {item}</li>
         ))}
       </ul>
     </div>

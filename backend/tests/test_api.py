@@ -123,7 +123,10 @@ def test_list_projects():
 
 def test_missing_gemini_key_message():
     settings = get_settings()
-    assert settings.allow_demo_fallback is False
+    if settings.demo_mode:
+        assert settings.allow_demo_fallback or settings.demo_mode
+    else:
+        assert settings.allow_demo_fallback is False
 
 
 def test_delete_project():

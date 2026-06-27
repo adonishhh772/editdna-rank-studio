@@ -78,16 +78,35 @@ class SLNGAudioClient:
             return str(output)
 
     async def analyse_audio_style(self, video_path: str) -> dict[str, Any]:
-        from app.services.audio_utils import extract_audio_from_video
+        from app.services.audio_utils import extract_audio_from_video, measure_audio_loudness_db
 
         audio_path = await extract_audio_from_video(video_path)
         transcript = await self.transcribe_feedback_audio(audio_path)
-        return {
+        loudness = await measure_audio_loudness_db(audio_path)
+
+        word_count = len(transcript.split())
+        estimated_style = "voice_first" if word_count > 20 else "music_driven"
+
+        result: dict[str, Any] = {
             "transcript_sample": transcript[:500],
             "has_speech": bool(transcript.strip()),
-            "estimated_style": "voice_first" if len(transcript.split()) > 20 else "music_driven",
+            "estimated_style": estimated_style,
             "confidence": 0.75,
+            **{key: value for key, value in loudness.items() if value is not None},
         }
+
+        mean_volume_db = loudness.get("mean_volume_db")
+        if isinstance(mean_volume_db, (int, float)):
+            if mean_volume_db >= -14.0:
+                result["energy"] = "high"
+                result["mood"] = "loud"
+            elif mean_volume_db >= -22.0:
+                result["energy"] = "medium"
+            else:
+                result["energy"] = "low"
+                result["mood"] = "quiet"
+
+        return result
 
     async def parse_voice_command(self, transcript: str) -> dict[str, Any]:
         lowered = transcript.lower()

@@ -14,6 +14,7 @@ import {
   uploadReference,
 } from "@/lib/api";
 import { resolveDisplayMemory } from "@/lib/memoryDisplay";
+import { filterTracesForTab, filterDownloadEventsForTab } from "@/lib/traceTabFilter";
 import { validateVideoUrl } from "@/lib/videoUrl";
 
 type ReferenceInputMode = "upload" | "url";
@@ -69,6 +70,14 @@ export default function NewProjectPage() {
   };
 
   const isLoading = workflowStream.isRunning;
+  const displayTraces = filterTracesForTab(
+    workflowStream.traces,
+    "reference",
+  );
+  const displayDownloads = filterDownloadEventsForTab(
+    workflowStream.downloadEvents,
+    "reference",
+  );
   const displayMemory = resolveDisplayMemory(
     { memory_context: {}, memory_updates: [] },
     {
@@ -80,7 +89,7 @@ export default function NewProjectPage() {
   return (
     <main className="mx-auto max-w-7xl px-6 py-12">
       <div className="grid gap-6 lg:grid-cols-[280px_1fr_280px]">
-        <AgentTracePanel traces={workflowStream.traces} downloadEvents={workflowStream.downloadEvents} />
+        <AgentTracePanel traces={displayTraces} downloadEvents={displayDownloads} />
 
         <div className="glass-card">
           <h1 className="text-3xl font-bold">New Ranking Project</h1>

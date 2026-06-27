@@ -10,6 +10,10 @@ import { useWorkflowStream } from "@/hooks/useWorkflowStream";
 import { getMemory, getProject, getTraces, setTopic } from "@/lib/api";
 import { resolveDisplayMemory } from "@/lib/memoryDisplay";
 import { resolveReferenceMediaUrl } from "@/lib/mediaUrl";
+import {
+  filterDownloadEventsForTab,
+  filterTracesForTab,
+} from "@/lib/traceTabFilter";
 import { BlueprintAnalytics } from "@/components/BlueprintAnalytics";
 import { VideoPreview } from "@/components/VideoPreview";
 
@@ -38,7 +42,12 @@ export default function BlueprintPage() {
   }, [projectId]);
 
   const blueprint = (project?.reference_blueprint as Record<string, unknown>) || null;
-  const displayTraces = workflowStream.isRunning ? workflowStream.traces : traces;
+  const rawTraces = workflowStream.isRunning ? workflowStream.traces : traces;
+  const displayTraces = filterTracesForTab(rawTraces, "blueprint");
+  const displayDownloads = filterDownloadEventsForTab(
+    workflowStream.downloadEvents,
+    "blueprint",
+  );
   const displayMemory = resolveDisplayMemory(
     {
       memory_context: memory.memory_context as Record<string, unknown>,
@@ -73,7 +82,7 @@ export default function BlueprintPage() {
   return (
     <ProjectShell active="blueprint">
       <div className="grid gap-6 lg:grid-cols-[280px_1fr_280px]">
-        <AgentTracePanel traces={displayTraces} />
+        <AgentTracePanel traces={displayTraces} downloadEvents={displayDownloads} />
         <div className="space-y-6">
           <div className="glass-card">
             <h1 className="text-3xl font-bold">Reference Blueprint</h1>

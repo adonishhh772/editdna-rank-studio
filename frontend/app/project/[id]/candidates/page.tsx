@@ -21,6 +21,10 @@ import {
   continueReviewUntilReady,
   REVIEW_STATUS_AWAITING_APPROVAL,
 } from "@/lib/candidateReviewFlow";
+import {
+  filterDownloadEventsForTab,
+  filterTracesForTab,
+} from "@/lib/traceTabFilter";
 
 type Candidate = {
   candidate_id: string;
@@ -53,6 +57,17 @@ export default function CandidatesPage() {
   const router = useRouter();
   const projectId = String(params.id);
   const workflowStream = useWorkflowStream();
+  const {
+    run: runWorkflow,
+    resetStream: resetWorkflowStream,
+    isRunning: isWorkflowRunning,
+    traces: workflowTraces,
+    downloadEvents: workflowDownloadEvents,
+    memoryContext: workflowMemoryContext,
+    memoryUpdates: workflowMemoryUpdates,
+    activeNodeLabel: workflowActiveNodeLabel,
+    activeReasoning: workflowActiveReasoning,
+  } = workflowStream;
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [reviewStatus, setReviewStatus] = useState<ReviewStatus | null>(null);
   const [traces, setTraces] = useState([]);
@@ -83,8 +98,8 @@ export default function CandidatesPage() {
   );
 
   const runWorkflowPath = useCallback(
-    (path: string) => workflowStream.run(path),
-    [workflowStream],
+    (path: string) => runWorkflow(path),
+    [runWorkflow],
   );
 
   const completeReviewAction = useCallback(
@@ -92,7 +107,7 @@ export default function CandidatesPage() {
       setIsPreparing(true);
       setError(null);
       try {
-        await workflowStream.run(endpoint);
+        await runWorkflow(endpoint);
         await continueReviewUntilReady(projectId, runWorkflowPath, fetchReviewStatus);
         await refresh();
       } catch (workflowError) {
@@ -116,7 +131,7 @@ export default function CandidatesPage() {
         setIsPreparing(false);
       }
     },
-    [fetchReviewStatus, projectId, refresh, runWorkflowPath, workflowStream],
+    [fetchReviewStatus, projectId, refresh, runWorkflow, runWorkflowPath],
   );
 
   const runReviewWorkflow = useCallback(
@@ -131,36 +146,64 @@ export default function CandidatesPage() {
   }, [projectId, runReviewWorkflow]);
 
   useEffect(() => {
+    let cancelled = false;
+
     const bootstrap = async () => {
       setError(null);
-      workflowStream.resetStream();
+      resetWorkflowStream();
 
       try {
         const existingProject = await getProject(projectId);
+        if (cancelled) {
+          return;
+        }
+
         const reviewQueue = existingProject.candidate_review_queue;
         const hasReviewQueue = Array.isArray(reviewQueue) && reviewQueue.length > 0;
 
         if (!hasReviewQueue) {
-          await workflowStream.run(`/api/projects/${projectId}/candidates/discover`);
+          await runWorkflow(`/api/projects/${projectId}/candidates/discover`);
+        }
+        if (cancelled) {
+          return;
         }
 
         setIsPreparing(true);
         try {
           await continueReviewUntilReady(projectId, runWorkflowPath, fetchReviewStatus);
         } finally {
-          setIsPreparing(false);
+          if (!cancelled) {
+            setIsPreparing(false);
+          }
+        }
+        if (cancelled) {
+          return;
         }
 
         await refresh();
       } catch (bootstrapError) {
-        setError(bootstrapError instanceof Error ? bootstrapError.message : "Candidate setup failed");
+        if (!cancelled) {
+          setError(bootstrapError instanceof Error ? bootstrapError.message : "Candidate setup failed");
+        }
       }
     };
+
     bootstrap();
-  }, [fetchReviewStatus, projectId, refresh, runWorkflowPath, workflowStream]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchReviewStatus, projectId, refresh, resetWorkflowStream, runWorkflow, runWorkflowPath]);
 
   const approvedCandidates = useMemo(
     () => ((project?.approved_candidates as Candidate[]) || []).slice().sort(
+      (left, right) => (left.recommended_rank || 99) - (right.recommended_rank || 99),
+    ),
+    [project],
+  );
+
+  const rejectedCandidates = useMemo(
+    () => ((project?.rejected_candidates as Candidate[]) || []).slice().sort(
       (left, right) => (left.recommended_rank || 99) - (right.recommended_rank || 99),
     ),
     [project],
@@ -185,7 +228,7 @@ export default function CandidatesPage() {
     totalSlots > 0;
 
   const canContinueToStudio =
-    !workflowStream.isRunning &&
+    !isWorkflowRunning &&
     !isPreparing &&
     actionCandidateId === null &&
     currentCandidate === null;
@@ -210,11 +253,11 @@ export default function CandidatesPage() {
 
   const handleRediscoverCandidates = async () => {
     setError(null);
-    workflowStream.resetStream();
+    resetWorkflowStream();
     setIsPreparing(true);
 
     try {
-      await workflowStream.run(`/api/projects/${projectId}/candidates/discover`);
+      await runWorkflow(`/api/projects/${projectId}/candidates/discover`);
       await refresh();
     } catch (rediscoverError) {
       setError(rediscoverError instanceof Error ? rediscoverError.message : "Candidate rediscovery failed");
@@ -231,17 +274,19 @@ export default function CandidatesPage() {
     router.push(`/project/${projectId}/studio`);
   };
 
-  const isLoading = workflowStream.isRunning || isPreparing;
-  const displayTraces = workflowStream.traces.length > 0 ? workflowStream.traces : traces;
-  const displayDownloads =
-    workflowStream.downloadEvents.length > 0 ? workflowStream.downloadEvents : (downloadEvents as never[]);
+  const isLoading = isWorkflowRunning || isPreparing;
+  const rawTraces = workflowTraces.length > 0 ? workflowTraces : traces;
+  const displayTraces = filterTracesForTab(rawTraces, "candidates");
+  const rawDownloads =
+    workflowDownloadEvents.length > 0 ? workflowDownloadEvents : (downloadEvents as never[]);
+  const displayDownloads = filterDownloadEventsForTab(rawDownloads, "candidates");
   const displayMemoryContext =
-    Object.keys(workflowStream.memoryContext).length > 0
-      ? workflowStream.memoryContext
+    Object.keys(workflowMemoryContext).length > 0
+      ? workflowMemoryContext
       : (memory.memory_context as Record<string, unknown>);
   const displayMemoryUpdates =
-    workflowStream.memoryUpdates.length > 0
-      ? workflowStream.memoryUpdates
+    workflowMemoryUpdates.length > 0
+      ? workflowMemoryUpdates
       : (memory.memory_updates as Array<Record<string, unknown>>);
   const statusMessage = reviewStatus?.message ?? "";
   const showPreparingState =
@@ -274,9 +319,9 @@ export default function CandidatesPage() {
           </div>
           {isLoading && (
             <WorkflowProgressBanner
-              isRunning={workflowStream.isRunning || isPreparing}
-              activeNodeLabel={workflowStream.activeNodeLabel}
-              activeReasoning={workflowStream.activeReasoning}
+              isRunning={isWorkflowRunning || isPreparing}
+              activeNodeLabel={workflowActiveNodeLabel}
+              activeReasoning={workflowActiveReasoning}
             />
           )}
           {error && <p className="text-pink-400">{error}</p>}
@@ -325,16 +370,33 @@ export default function CandidatesPage() {
               ))}
             </div>
           )}
+          {rejectedCandidates.length > 0 && (
+            <div className="space-y-3" data-testid="rejected-candidates-list">
+              <h2 className="text-sm font-semibold uppercase tracking-wider text-pink-400">Rejected</h2>
+              {rejectedCandidates.map((candidate) => (
+                <CandidateCard
+                  key={candidate.candidate_id}
+                  candidate={candidate}
+                  variant="rejected"
+                  isReadOnly
+                  onApprove={() => undefined}
+                  onReject={() => undefined}
+                  onMoveUp={() => undefined}
+                  onMoveDown={() => undefined}
+                />
+              ))}
+            </div>
+          )}
           {showPreparingState && !currentCandidate && (
             <div className="glass-card text-slate-400" data-testid="candidate-preparing-state">
-              {workflowStream.activeReasoning ||
+              {workflowActiveReasoning ||
                 "Fetching the next topic Short from YouTube + TikTok..."}
             </div>
           )}
           {currentCandidate ? (
             <div className="space-y-2">
               <h2 className="text-sm font-semibold uppercase tracking-wider text-neonBlue">
-                Review Slot #{currentCandidate.recommended_rank ?? reviewStatus?.current_slot_rank}
+                Review: {currentCandidate.title || currentCandidate.concept}
               </h2>
               <CandidateCard
                 key={currentCandidate.candidate_id}

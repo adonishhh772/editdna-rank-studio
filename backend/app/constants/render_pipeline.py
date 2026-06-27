@@ -1,0 +1,13 @@
+RANK_CLIP_RENDER_REQUEST_KEY = "_rank_clip_render_request"
+RENDER_PROCESSED_CLIPS_KEY = "_render_processed_clips"
+VIDEO_STITCH_REQUEST_KEY = "_video_stitch_request"
+HOOK_OVERLAY_REQUEST_KEY = "_hook_overlay_request"
+AUDIO_MIX_REQUEST_KEY = "_audio_mix_request"
+RENDER_OUTPUT_PATH_KEY = "_render_output_path"
+
+RENDER_STAGE_TRIM = "trim"
+RENDER_STAGE_SCALE = "scale"
+RENDER_STAGE_CAPTION = "caption"
+RENDER_STAGE_STITCH = "stitch"
+RENDER_STAGE_HOOK = "hook"
+RENDER_STAGE_AUDIO = "audio"

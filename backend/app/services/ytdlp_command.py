@@ -6,6 +6,21 @@ from pathlib import Path
 
 YTDLP_REMOTE_COMPONENTS = ("ejs:github",)
 YTDLP_MIN_NODE_MAJOR = 20
+YTDLP_IMPERSONATE_TARGET = "chrome"
+
+
+def impersonation_available() -> bool:
+    try:
+        import curl_cffi  # noqa: F401
+    except ImportError:
+        return False
+    return True
+
+
+def resolve_impersonate_target() -> str | None:
+    if not impersonation_available():
+        return None
+    return YTDLP_IMPERSONATE_TARGET
 
 
 def resolve_js_runtime() -> tuple[str, str] | None:
@@ -63,6 +78,10 @@ def build_ytdlp_base_args() -> list[str]:
 
     for component in YTDLP_REMOTE_COMPONENTS:
         args.extend(["--remote-components", component])
+
+    impersonate_target = resolve_impersonate_target()
+    if impersonate_target is not None:
+        args.extend(["--impersonate", impersonate_target])
 
     return args
 

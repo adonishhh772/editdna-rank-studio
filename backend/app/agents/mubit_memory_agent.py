@@ -2,10 +2,19 @@ import logging
 
 from app.agents.base import BaseAgent
 from app.blackboard import ProjectBlackboard
+from app.constants.feedback import (
+    FEEDBACK_SENTIMENT_NEGATIVE,
+    FEEDBACK_SENTIMENT_POSITIVE,
+)
 from app.db import new_id, save_blackboard
 from app.integrations.mubit_client import MubitMemoryClient
 from app.schemas import MemoryUpdate
 from app.services.blueprint_memory import build_reference_blueprint_memory_content
+from app.services.feedback_learning_service import (
+    build_memory_scope_updates,
+    classify_feedback_sentiment,
+    feedback_memory_summary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -27,29 +36,28 @@ class MubitMemoryAgent(BaseAgent):
         return blackboard
 
     async def write_feedback_memory(self, blackboard: ProjectBlackboard) -> ProjectBlackboard:
+        recent_feedback = blackboard.feedback_events[-5:]
         short_term: list[dict] = []
         episodic: list[dict] = []
         long_term: list[dict] = []
-        explicit_preference_markers = ["prefer", "always", "never", "dislike", "like"]
 
-        for feedback in blackboard.feedback_events[-5:]:
-            content = feedback.feedback_text or feedback.feedback_type
-            short_term.append({"content": content, "type": feedback.feedback_type})
-            if feedback.feedback_type in {"approve", "reject", "final_approve"}:
-                episodic.append({"content": content})
-            if feedback.feedback_text and any(
-                marker in feedback.feedback_text.lower() for marker in explicit_preference_markers
-            ):
-                long_term.append({"content": feedback.feedback_text})
+        for feedback in recent_feedback:
+            sentiment = classify_feedback_sentiment(feedback.feedback_text, feedback.feedback_type)
+            scoped_short, scoped_episodic, scoped_long = build_memory_scope_updates(feedback, sentiment)
+            short_term.extend(scoped_short)
+            episodic.extend(scoped_episodic)
+            long_term.extend(scoped_long)
 
         mubit_synced = True
         try:
             client = MubitMemoryClient(run_id=blackboard.run_id)
-            for feedback in blackboard.feedback_events[-5:]:
+            for feedback in recent_feedback:
                 content = feedback.feedback_text or feedback.feedback_type
+                sentiment = classify_feedback_sentiment(feedback.feedback_text, feedback.feedback_type)
                 metadata = {
                     "memory_scope": "short_term",
                     "feedback_type": feedback.feedback_type,
+                    "sentiment": sentiment,
                     "topic": blackboard.topic or "",
                 }
                 await client.remember_short_term(
@@ -60,7 +68,7 @@ class MubitMemoryAgent(BaseAgent):
                     content=content,
                     metadata=metadata,
                 )
-                if feedback.feedback_type in {"approve", "reject", "final_approve"}:
+                if sentiment in {FEEDBACK_SENTIMENT_POSITIVE, FEEDBACK_SENTIMENT_NEGATIVE}:
                     await client.remember_episodic(
                         user_id=blackboard.user_id,
                         project_id=blackboard.project_id,
@@ -69,15 +77,20 @@ class MubitMemoryAgent(BaseAgent):
                         content=f"In project {blackboard.project_id}: {content}",
                         metadata={**metadata, "memory_scope": "episodic"},
                     )
-                if feedback.feedback_text and any(
-                    marker in feedback.feedback_text.lower() for marker in explicit_preference_markers
+                if sentiment == FEEDBACK_SENTIMENT_POSITIVE or (
+                    feedback.feedback_text
+                    and sentiment == FEEDBACK_SENTIMENT_NEGATIVE
+                    and any(
+                        marker in feedback.feedback_text.lower()
+                        for marker in ("prefer", "always", "never", "dislike", "like")
+                    )
                 ):
                     await client.remember_long_term(
                         user_id=blackboard.user_id,
                         project_id=blackboard.project_id,
                         run_id=blackboard.run_id,
                         agent_id=self.agent_id,
-                        content=feedback.feedback_text,
+                        content=feedback.feedback_text or content,
                         metadata={**metadata, "memory_scope": "long_term"},
                     )
         except Exception as error:
@@ -88,7 +101,14 @@ class MubitMemoryAgent(BaseAgent):
                 error,
             )
 
-        sync_note = "" if mubit_synced else " (local only — Mubit sync failed)"
+        latest_sentiment = (
+            classify_feedback_sentiment(
+                recent_feedback[-1].feedback_text,
+                recent_feedback[-1].feedback_type,
+            )
+            if recent_feedback
+            else "neutral"
+        )
         update = MemoryUpdate(
             memory_update_id=new_id("mem"),
             project_id=blackboard.project_id,
@@ -98,9 +118,12 @@ class MubitMemoryAgent(BaseAgent):
             episodic_updates=episodic,
             long_term_updates=long_term,
             confidence=0.85 if short_term and mubit_synced else 0.5,
-            summary=(
-                f"Stored {len(short_term)} short-term, {len(episodic)} episodic, "
-                f"{len(long_term)} long-term updates{sync_note}"
+            summary=feedback_memory_summary(
+                short_term_count=len(short_term),
+                episodic_count=len(episodic),
+                long_term_count=len(long_term),
+                sentiment=latest_sentiment,
+                mubit_synced=mubit_synced,
             ),
         )
         blackboard.memory_updates.append(update.model_dump())

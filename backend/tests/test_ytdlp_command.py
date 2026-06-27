@@ -1,6 +1,8 @@
 from app.services.ytdlp_command import (
     build_ytdlp_base_args,
     build_ytdlp_download_args,
+    impersonation_available,
+    resolve_impersonate_target,
     resolve_js_runtime,
     resolve_ytdlp_executable,
 )
@@ -16,6 +18,13 @@ def test_build_ytdlp_base_args_includes_remote_components():
     assert args[0] == resolve_ytdlp_executable()[0]
     assert "--remote-components" in args
     assert "ejs:github" in args
+    if impersonation_available():
+        assert "--impersonate" in args
+        assert resolve_impersonate_target() in args
+
+
+def test_impersonation_available_matches_curl_cffi_import():
+    assert impersonation_available() == (resolve_impersonate_target() is not None)
 
 
 def test_build_ytdlp_download_args_includes_output_template():

@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { AgentTracePanel } from "@/components/AgentTracePanel";
+import { AiFeedbackPanel } from "@/components/AiFeedbackPanel";
 import { ApprovalControls } from "@/components/ApprovalControls";
+import { LearningPreferencesPanel } from "@/components/LearningPreferencesPanel";
 import { MemoryPanel } from "@/components/MemoryPanel";
 import { ProjectShell } from "@/components/ProjectShell";
 import { TimelinePlan } from "@/components/TimelinePlan";
@@ -16,10 +18,19 @@ import {
   getMemory,
   getProject,
   getTraces,
-  renderVideo,
   submitTextFeedback,
 } from "@/lib/api";
 import { resolveReferenceMediaUrl } from "@/lib/mediaUrl";
+import {
+  FEEDBACK_SOURCE_STAGE_STUDIO,
+  FEEDBACK_TYPE_AI_SUGGESTED,
+} from "@/lib/feedbackMemory";
+import type { AiFeedbackSuggestion } from "@/lib/editPlanAiFeedback";
+import {
+  filterAgentMessagesForTab,
+  filterDownloadEventsForTab,
+  filterTracesForTab,
+} from "@/lib/traceTabFilter";
 
 export default function StudioPage() {
   const params = useParams();
@@ -29,7 +40,6 @@ export default function StudioPage() {
   const [project, setProject] = useState<Record<string, unknown> | null>(null);
   const [traces, setTraces] = useState([]);
   const [memory, setMemory] = useState<Record<string, unknown>>({ memory_context: {}, memory_updates: [] });
-  const [renderLoading, setRenderLoading] = useState(false);
   const [approveLoading, setApproveLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -111,48 +121,75 @@ export default function StudioPage() {
   };
 
   const handleRenderVideo = async () => {
-    setRenderLoading(true);
     setError(null);
+    workflowStream.resetStream();
     try {
-      await renderVideo(projectId);
+      await workflowStream.run(`/api/projects/${projectId}/render`);
+      await refresh();
       router.push(`/project/${projectId}/review`);
     } catch (renderError) {
       setError(renderError instanceof Error ? renderError.message : "Render failed");
-    } finally {
-      setRenderLoading(false);
+      await refresh();
     }
   };
 
   const handleApproveAndRender = async () => {
     setApproveLoading(true);
-    setRenderLoading(true);
     setError(null);
+    workflowStream.resetStream();
     try {
       await approveEditPlan(projectId);
-      await renderVideo(projectId);
+      await workflowStream.run(`/api/projects/${projectId}/render`);
+      await refresh();
       router.push(`/project/${projectId}/review`);
     } catch (renderError) {
       setError(renderError instanceof Error ? renderError.message : "Render failed");
+      await refresh();
     } finally {
       setApproveLoading(false);
-      setRenderLoading(false);
     }
   };
 
-  const handleQuickFeedback = async (text: string) => {
-    await submitTextFeedback(projectId, text);
-    await refresh();
+  const handleApplyAiSuggestion = async (suggestion: AiFeedbackSuggestion) => {
+    setError(null);
+    workflowStream.resetStream();
+    try {
+      await submitTextFeedback(
+        projectId,
+        suggestion.feedback_text,
+        FEEDBACK_TYPE_AI_SUGGESTED,
+        FEEDBACK_SOURCE_STAGE_STUDIO,
+      );
+      const board = await workflowStream.run(`/api/projects/${projectId}/edit-plan`);
+      await refresh();
+      if (board?.edit_plan) {
+        setProject((current) => ({ ...(current || {}), ...board }));
+      }
+    } catch (suggestionError) {
+      setError(
+        suggestionError instanceof Error ? suggestionError.message : "AI feedback apply failed",
+      );
+      await refresh();
+    }
   };
 
-  const isLoading = workflowStream.isRunning || renderLoading || approveLoading;
+  const isLoading = workflowStream.isRunning || approveLoading;
   const editPlan = (project?.edit_plan as Record<string, unknown>) || null;
   const editPlanNeedsApproval = Boolean(editPlan?.needs_human_approval);
   const storyReady = Boolean(editPlan?.story_ready);
   const storyIssues = (editPlan?.story_issues as string[]) || [];
-  const displayTraces = workflowStream.isRunning ? workflowStream.traces : traces;
-  const displayMessages = workflowStream.isRunning
-    ? workflowStream.agentMessages
-    : ((project?.agent_messages as never[]) || []);
+  const rawTraces = workflowStream.isRunning ? workflowStream.traces : traces;
+  const displayTraces = filterTracesForTab(rawTraces, "studio");
+  const displayMessages = filterAgentMessagesForTab(
+    workflowStream.isRunning
+      ? workflowStream.agentMessages
+      : ((project?.agent_messages as never[]) || []),
+    "studio",
+  );
+  const displayDownloads = filterDownloadEventsForTab(
+    workflowStream.downloadEvents,
+    "studio",
+  );
 
   const referencePreviewUrl = resolveReferenceMediaUrl(
     projectId,
@@ -163,7 +200,11 @@ export default function StudioPage() {
   return (
     <ProjectShell active="studio">
       <div className="grid gap-6 lg:grid-cols-[280px_1fr_280px]">
-        <AgentTracePanel traces={displayTraces} agentMessages={displayMessages} />
+        <AgentTracePanel
+          traces={displayTraces}
+          agentMessages={displayMessages}
+          downloadEvents={displayDownloads}
+        />
         <div className="space-y-6">
           <div className="glass-card">
             <h1 className="text-3xl font-bold">Edit Studio</h1>
@@ -190,7 +231,6 @@ export default function StudioPage() {
               activeReasoning={workflowStream.activeReasoning}
             />
           )}
-          {isLoading && !workflowStream.isRunning && <p className="text-slate-400">Rendering video...</p>}
           {error && <p className="text-pink-400">{error}</p>}
           <VideoEditInsights editPlan={editPlan} />
           <VideoPreview title="Reference" src={referencePreviewUrl} />
@@ -198,8 +238,8 @@ export default function StudioPage() {
             <div className="glass-card border-amber-500/20" data-testid="edit-plan-story-issues">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-amber-400">Story Review</h3>
               <ul className="mt-2 space-y-1 text-sm text-amber-100">
-                {storyIssues.map((issue) => (
-                  <li key={issue}>{issue}</li>
+                {storyIssues.map((issue, index) => (
+                  <li key={`story-issue-${index}`}>{issue}</li>
                 ))}
               </ul>
             </div>
@@ -216,26 +256,31 @@ export default function StudioPage() {
             </button>
           </div>
           <TimelinePlan editPlan={editPlan} />
+          <AiFeedbackPanel
+            editPlan={editPlan}
+            onApplySuggestion={handleApplyAiSuggestion}
+            disabled={isLoading}
+          />
           <ApprovalControls
             approveLabel={editPlanNeedsApproval ? "Approve Edit Plan" : "Render Video"}
             onApprove={editPlanNeedsApproval ? handleApproveEditPlan : handleRenderVideo}
             onReject={editPlanNeedsApproval ? handleRegenerateEditPlan : undefined}
             rejectLabel="Regenerate Plan"
             disabled={isLoading}
-            extraActions={[
-              ...(editPlanNeedsApproval
+            extraActions={
+              editPlanNeedsApproval
                 ? [{ label: "Approve & Render", onClick: handleApproveAndRender }]
-                : []),
-              { label: "Fewer captions", onClick: () => handleQuickFeedback("Reduce captions") },
-              { label: "More dramatic #1", onClick: () => handleQuickFeedback("Make number 1 more dramatic") },
-              { label: "Fix story mismatch", onClick: () => handleQuickFeedback("Fix voiceover and story mismatches") },
-            ]}
+                : []
+            }
           />
         </div>
-        <MemoryPanel
-          memoryContext={memory.memory_context as Record<string, unknown>}
-          memoryUpdates={memory.memory_updates as Array<Record<string, unknown>>}
-        />
+        <div className="space-y-6">
+          <LearningPreferencesPanel memoryContext={memory.memory_context as Record<string, unknown>} />
+          <MemoryPanel
+            memoryContext={memory.memory_context as Record<string, unknown>}
+            memoryUpdates={memory.memory_updates as Array<Record<string, unknown>>}
+          />
+        </div>
       </div>
     </ProjectShell>
   );

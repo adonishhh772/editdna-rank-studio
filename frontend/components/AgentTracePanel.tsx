@@ -82,6 +82,12 @@ function conciseStageLabel(stage: string): string {
     download_success: "Downloaded",
     download_failed: "Failed",
     skipped: "Skipped",
+    trim: "Trimming clip",
+    scale: "Scaling clip",
+    caption: "Adding caption",
+    stitch: "Stitching clips",
+    hook: "Adding hook",
+    audio: "Mixing audio",
   };
   return labels[stage] || stage.replace(/_/g, " ");
 }

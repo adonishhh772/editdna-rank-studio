@@ -5,7 +5,7 @@ from app.blackboard import ProjectBlackboard
 from app.constants.candidate_review import (
     MAX_DOWNLOAD_TRIES_PER_SLOT,
     MAX_PREPARE_SLOTS_PER_REQUEST,
-    MAX_SEARCH_ATTEMPTS_PER_SLOT,
+    PLATFORM_SEARCH_HIT_POOL_KEY,
     SLOT_STATUS_APPROVED,
     SLOT_STATUS_AWAITING_APPROVAL,
     SLOT_STATUS_EXHAUSTED,
@@ -32,7 +32,6 @@ from app.services.video_constraint_service import (
     evaluate_video_fit,
 )
 from app.services.concept_sanitizer import (
-    build_platform_search_concept,
     build_topic_shorts_search_query,
     normalize_research_concepts,
 )
@@ -244,16 +243,8 @@ class CandidateReviewService:
             slot.rejected_urls.append(rejected.source_url)
 
         slot.current_candidate = None
-        slot.search_attempts += 1
         slot.status = SLOT_STATUS_PENDING
         slot.last_error = None
-
-        if slot.search_attempts >= MAX_SEARCH_ATTEMPTS_PER_SLOT:
-            slot.status = SLOT_STATUS_EXHAUSTED
-            slot.last_error = (
-                f"Could not find an acceptable video for '{slot.concept}' "
-                f"after {MAX_SEARCH_ATTEMPTS_PER_SLOT} attempts"
-            )
 
         blackboard.selected_candidates = []
         save_blackboard(blackboard)
@@ -280,6 +271,13 @@ class CandidateReviewService:
         blackboard: ProjectBlackboard,
         slot: CandidateReviewSlot,
     ) -> ProjectBlackboard:
+        from app.services.demo_pack_loader import is_demo_mode_active
+        from app.services.demo_replay_service import DemoReplayService
+
+        if is_demo_mode_active():
+            demo = DemoReplayService.active()
+            return await demo.prepare_slot(blackboard, slot)
+
         topic = blackboard.topic or ""
         youtube_search_mode = (
             blackboard.topic_research.youtube_search_mode if blackboard.topic_research else None
@@ -292,28 +290,14 @@ class CandidateReviewService:
             constraints.for_source_acceptance(youtube_search_mode) if constraints else None
         )
 
-        search_concept = build_platform_search_concept(slot.concept, topic, slot.slot_rank)
-        topic_search_concept = build_topic_shorts_search_query(topic, slot.slot_rank)
-
         hits = await self._search_platform_hits(
             blackboard,
-            concept=search_concept,
             topic=topic,
             slot=slot,
             youtube_search_mode=youtube_search_mode,
         )
 
-        if not hits and topic_search_concept != search_concept:
-            hits = await self._search_platform_hits(
-                blackboard,
-                concept=topic_search_concept,
-                topic=topic,
-                slot=slot,
-                youtube_search_mode=youtube_search_mode,
-            )
-
         if not hits:
-            slot.search_attempts += 1
             constraint_hint = ""
             if search_constraints:
                 constraint_hint = (
@@ -322,16 +306,10 @@ class CandidateReviewService:
                     f"{search_constraints.max_source_duration_sec:.0f}s), "
                     f"{search_constraints.aspect_ratio}"
                 )
-            if slot.search_attempts >= MAX_SEARCH_ATTEMPTS_PER_SLOT:
-                slot.status = SLOT_STATUS_EXHAUSTED
-                slot.last_error = (
-                    f"No Shorts found for topic '{topic or slot.concept}'{constraint_hint}"
-                )
-            else:
-                slot.status = SLOT_STATUS_PENDING
-                slot.last_error = (
-                    f"No Shorts found for topic '{topic or slot.concept}'{constraint_hint}"
-                )
+            slot.status = SLOT_STATUS_EXHAUSTED
+            slot.last_error = (
+                f"No more Shorts available for topic '{topic or slot.concept}'{constraint_hint}"
+            )
             blackboard.selected_candidates = []
             save_blackboard(blackboard)
             return blackboard
@@ -431,20 +409,43 @@ class CandidateReviewService:
         save_blackboard(blackboard)
         return blackboard
 
-    async def _search_platform_hits(
+    def _collect_blocked_urls(
+        self,
+        blackboard: ProjectBlackboard,
+        slot: CandidateReviewSlot | None = None,
+    ) -> set[str]:
+        blocked: set[str] = set()
+        if slot is not None:
+            blocked.update(slot.rejected_urls)
+        for review_slot in blackboard.candidate_review_queue:
+            blocked.update(review_slot.rejected_urls)
+        for candidate in blackboard.approved_candidates:
+            if candidate.source_url:
+                blocked.add(candidate.source_url)
+        for candidate in blackboard.rejected_candidates:
+            if candidate.source_url:
+                blocked.add(candidate.source_url)
+        awaiting_slot = self._find_awaiting_slot(blackboard)
+        if awaiting_slot and awaiting_slot.current_candidate and awaiting_slot.current_candidate.source_url:
+            blocked.add(awaiting_slot.current_candidate.source_url)
+        return blocked
+
+    async def _ensure_platform_hit_pool(
         self,
         blackboard: ProjectBlackboard,
         *,
-        concept: str,
         topic: str,
-        slot: CandidateReviewSlot,
         youtube_search_mode: str | None,
-    ) -> list[PlatformSearchHit]:
-        fetch_service = WebVideoFetchService()
+    ) -> list[dict[str, object]]:
+        cached_pool = blackboard.memory_context.get(PLATFORM_SEARCH_HIT_POOL_KEY)
+        if isinstance(cached_pool, list) and cached_pool:
+            return cached_pool
+
+        search_concept = build_topic_shorts_search_query(topic)
         blackboard.memory_context["_platform_search_request"] = {
-            "concept": concept,
+            "concept": search_concept,
             "topic": topic,
-            "exclude_urls": list(slot.rejected_urls),
+            "exclude_urls": [],
             "youtube_search_mode": youtube_search_mode,
         }
         save_blackboard(blackboard)
@@ -453,7 +454,31 @@ class CandidateReviewService:
         blackboard = await swarm_agent.execute(blackboard, swarm=True)
         merged_raw = blackboard.memory_context.pop("_platform_search_merged_hits", [])
         blackboard.memory_context.pop("_platform_search_request", None)
-        return fetch_service.hits_from_dicts(merged_raw)
+        blackboard.memory_context[PLATFORM_SEARCH_HIT_POOL_KEY] = merged_raw
+        save_blackboard(blackboard)
+        return merged_raw
+
+    async def _search_platform_hits(
+        self,
+        blackboard: ProjectBlackboard,
+        *,
+        topic: str,
+        slot: CandidateReviewSlot,
+        youtube_search_mode: str | None,
+    ) -> list[PlatformSearchHit]:
+        fetch_service = WebVideoFetchService()
+        pool_raw = await self._ensure_platform_hit_pool(
+            blackboard,
+            topic=topic,
+            youtube_search_mode=youtube_search_mode,
+        )
+        blocked_urls = self._collect_blocked_urls(blackboard, slot)
+        available_hits = [
+            hit
+            for hit in pool_raw
+            if str(hit.get("url") or "") and str(hit.get("url")) not in blocked_urls
+        ]
+        return fetch_service.hits_from_dicts(available_hits)
 
     async def _validate_local_candidate(
         self,

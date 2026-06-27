@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   runWorkflowStream,
   type WorkflowAgentMessage,
@@ -122,17 +122,32 @@ export function useWorkflowStream() {
     }
   }, []);
 
-  return {
-    traces: state.traces,
-    downloadEvents: state.downloadEvents,
-    agentMessages: state.agentMessages,
-    activeNodeLabel: state.activeNodeLabel,
-    activeReasoning: state.activeReasoning,
-    memoryContext: state.memoryContext,
-    memoryUpdates: state.memoryUpdates,
-    learningPreferences: state.learningPreferences,
-    isRunning: state.isRunning,
-    run,
-    resetStream,
-  };
+  return useMemo(
+    () => ({
+      traces: state.traces,
+      downloadEvents: state.downloadEvents,
+      agentMessages: state.agentMessages,
+      activeNodeLabel: state.activeNodeLabel,
+      activeReasoning: state.activeReasoning,
+      memoryContext: state.memoryContext,
+      memoryUpdates: state.memoryUpdates,
+      learningPreferences: state.learningPreferences,
+      isRunning: state.isRunning,
+      run,
+      resetStream,
+    }),
+    [
+      state.traces,
+      state.downloadEvents,
+      state.agentMessages,
+      state.activeNodeLabel,
+      state.activeReasoning,
+      state.memoryContext,
+      state.memoryUpdates,
+      state.learningPreferences,
+      state.isRunning,
+      run,
+      resetStream,
+    ],
+  );
 }

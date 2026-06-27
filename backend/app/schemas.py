@@ -231,6 +231,15 @@ class RankedClip(BaseModel):
     analysis_scores: Dict[str, float] = Field(default_factory=dict)
 
 
+class AiFeedbackSuggestion(BaseModel):
+    suggestion_id: str
+    label: str
+    feedback_text: str
+    severity: Literal["info", "warning", "critical"] = "info"
+    source: str
+    rank: Optional[int] = None
+
+
 class EditPlan(BaseModel):
     edit_plan_id: str
     project_id: str
@@ -251,6 +260,7 @@ class EditPlan(BaseModel):
     video_insights: Dict[str, Any] = Field(default_factory=dict)
     story_ready: bool = False
     story_issues: List[str] = Field(default_factory=list)
+    ai_feedback_suggestions: List[AiFeedbackSuggestion] = Field(default_factory=list)
     needs_human_approval: bool = True
 
 
@@ -267,6 +277,9 @@ class FeedbackEvent(BaseModel):
         "text_feedback",
         "voice_feedback",
         "final_approve",
+        "positive_feedback",
+        "negative_feedback",
+        "ai_suggested_feedback",
     ]
     target_type: Optional[str] = None
     target_id: Optional[str] = None
@@ -334,6 +347,7 @@ class CandidateReorderRequest(BaseModel):
 class TextFeedbackRequest(BaseModel):
     feedback_text: str
     feedback_type: str = "text_feedback"
+    source_stage: Optional[str] = None
     target_type: Optional[str] = None
     target_id: Optional[str] = None
     user_id: str = "default-user"
@@ -348,6 +362,16 @@ class ProjectSummaryResponse(BaseModel):
     updated_at: str
 
 
+class IntegrationHealthItem(BaseModel):
+    id: str
+    label: str
+    configured: bool
+    reachable: Optional[bool] = None
+    status: str
+    message: Optional[str] = None
+    optional_in_demo: bool = False
+
+
 class ApiStatusResponse(BaseModel):
     gemini: bool
     tavily: bool
@@ -355,3 +379,5 @@ class ApiStatusResponse(BaseModel):
     mubit: bool
     missing_keys: List[str]
     allow_demo_fallback: bool
+    demo_mode: Optional[str] = None
+    integrations: List[IntegrationHealthItem] = Field(default_factory=list)

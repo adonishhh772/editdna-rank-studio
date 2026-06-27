@@ -8,14 +8,13 @@ from app.agents.candidate_discovery_agent import CandidateDiscoveryAgent
 from app.agents.comparison_agent import ComparisonAgent
 from app.agents.fusion_agent import FusionAgent
 from app.agents.human_gate_agent import HumanGateAgent
-from app.agents.moe_bus import MoEBus
 from app.agents.mubit_memory_agent import MubitMemoryAgent
 from app.agents.platform_video_download_agent import PlatformVideoDownloadAgent
 from app.agents.platform_video_search_agent import PlatformVideoSearchAgent
 from app.agents.ranking_agent import RankingAgent
 from app.agents.reference_analyst_agent import ReferenceAnalystAgent
 from app.agents.slng_audio_agent import SLNGAudioAgent
-from app.agents.story_agent import CaptionAgent, CriticAgent, CutAgent, MotionAgent, StoryAgent
+from app.agents.story_agent import CriticAgent
 from app.agents.tavily_research_agent import TavilyResearchAgent
 from app.agents.topic_agent import TopicAgent
 from app.agents.workflow.state import WorkflowState
@@ -24,8 +23,10 @@ from app.config import get_settings
 from app.db import new_id, save_blackboard
 from app.schemas import EditPlan, FeedbackEvent, RankedClip
 from app.constants.harness import HARNESS_ROUTE_CONTINUE, HARNESS_ROUTE_RETRY, MAX_HARNESS_REVISIONS
+from app.services.edit_plan_feedback_service import build_ai_edit_plan_feedback_suggestions
 from app.services.goal_harness import reset_moe_state_for_retry
-from app.services.renderer import VideoRenderer
+from app.services.reference_audio_plan_service import build_audio_plan_from_reference
+from app.services.reference_render_style_service import build_render_settings_from_blueprint
 from app.services.story_coherence_service import (
     enrich_ranked_clip_story_fields,
     evaluate_edit_plan_story_coherence,
@@ -163,10 +164,11 @@ async def validate_candidates_node(state: WorkflowState) -> dict[str, ProjectBla
 
 
 async def moe_pipeline_node(state: WorkflowState) -> dict[str, ProjectBlackboard]:
+    from app.agents.moe_edit_swarm_agent import MoEEditSwarmAgent
+
     blackboard = state["blackboard"]
-    moe_experts = [StoryAgent(), CutAgent(), CaptionAgent(), MotionAgent()]
-    moe_bus = MoEBus()
-    blackboard = await moe_bus.run_moe_pipeline(moe_experts, blackboard)
+    swarm = MoEEditSwarmAgent()
+    blackboard = await swarm.execute(blackboard, swarm=True)
     save_blackboard(blackboard)
     return {"blackboard": blackboard}
 
@@ -188,6 +190,10 @@ async def build_edit_plan_node(state: WorkflowState) -> dict[str, ProjectBlackbo
 
     video_insights = build_edit_video_insights(blackboard)
     story_ready, story_issues = evaluate_edit_plan_story_coherence(sections)
+    ai_feedback_suggestions = build_ai_edit_plan_feedback_suggestions(
+        story_issues=story_issues,
+        sections=sections,
+    )
 
     edit_plan = EditPlan(
         edit_plan_id=new_id("plan"),
@@ -200,10 +206,12 @@ async def build_edit_plan_node(state: WorkflowState) -> dict[str, ProjectBlackbo
         outro_text=outro_text,
         sections=sections,
         captions=captions,
-        audio_plan={"mix": "voice_first", "normalize": True},
+        audio_plan=build_audio_plan_from_reference(blueprint),
         motion_plan=motion_plan,
         transition_plan=transition_plan,
-        render_settings={"width": 1080, "height": 1920, "fps": 30},
+        render_settings=build_render_settings_from_blueprint(
+            blueprint.model_dump() if blueprint else None
+        ),
         reference_blueprint_applied=blueprint.model_dump() if blueprint else {},
         memory_influence={
             **blackboard.memory_context,
@@ -213,6 +221,7 @@ async def build_edit_plan_node(state: WorkflowState) -> dict[str, ProjectBlackbo
         video_insights=video_insights,
         story_ready=story_ready,
         story_issues=story_issues,
+        ai_feedback_suggestions=ai_feedback_suggestions,
         needs_human_approval=True,
     )
     blackboard.edit_plan = edit_plan
@@ -221,15 +230,14 @@ async def build_edit_plan_node(state: WorkflowState) -> dict[str, ProjectBlackbo
 
 
 async def render_node(state: WorkflowState) -> dict[str, ProjectBlackboard]:
+    from app.agents.render_swarm_agent import RenderSwarmAgent
+
     blackboard = state["blackboard"]
     if not blackboard.edit_plan:
         raise RuntimeError("Edit plan is required for rendering")
 
-    renderer = VideoRenderer()
-    voiceover = blackboard.edit_plan.audio_plan.get("voiceover_path")
-    output_path = await renderer.render(blackboard.edit_plan, voiceover)
-    blackboard.output_video_path = output_path
-    blackboard.stage = "rendered"
+    swarm = RenderSwarmAgent()
+    blackboard = await swarm.execute(blackboard, swarm=True)
     save_blackboard(blackboard)
     return {"blackboard": blackboard}
 

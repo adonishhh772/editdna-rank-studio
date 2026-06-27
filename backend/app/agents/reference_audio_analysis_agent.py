@@ -43,7 +43,13 @@ class ReferenceAudioAnalysisAgent(BaseAgent):
             blackboard.reference_video_path = audio_result.local_file_path
 
         mood = audio_result.audio_style.get("mood") or audio_result.audio_style.get("energy")
-        trace.output_summary = f"Audio style captured{f' — {mood}' if mood else ''}"
+        mean_volume_db = audio_result.audio_style.get("mean_volume_db")
+        loudness_hint = (
+            f", mean {mean_volume_db:.1f} dB"
+            if isinstance(mean_volume_db, (int, float))
+            else ""
+        )
+        trace.output_summary = f"Audio style captured{f' — {mood}{loudness_hint}' if mood or loudness_hint else ''}"
         self.log_tool_call(
             blackboard,
             "slng_audio_analysis",
